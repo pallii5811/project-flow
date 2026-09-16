@@ -4,6 +4,18 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-16 — Distributor only, free forever, Ad Charter, zero owner cash
+
+**Decision (owner):** PROJECT FLOW is a **distributor** of vertical dramas made by others and never produces. Viewing is **free forever**. Revenue comes from series sponsors, shop-the-scene commissions and ad breaks capped by the **Ad Charter**: nothing in the first 10 watched minutes of a session, only at episode boundaries, at most 30 s per break and 180 s per viewing hour, contextual targeting only. Producers get **50%** of market revenue pro-rata to verified watched minutes, non-exclusive, with "second life" catalog titles preferred. The owner puts in **zero personal cash**: free tiers that allow commercial use, pay-per-use only. Video is delivered from zero-egress storage (Cloudflare R2), the site is served as static files (Cloudflare Pages), and events are collected by Workers + D1.
+
+**Why:** The owner wants hundreds of millions of viewers, a free product and no personal spend. Hongguo (304M monthly users, free, ad-funded, revenue shared with 400+ rights partners) and Tubi (>$1.1B FY2025 revenue, 4–6 ad-minutes per hour, profitable since July–September 2025) show that free, ad-funded distribution of third-party content works at scale. The unit economics in `docs/business-model.md` show the model breaks with per-minute delivery pricing (−$0.41 per viewer per month in a rich market) and holds on zero-egress storage (+$0.33 rich, +$0.03 emerging, estimated).
+
+**Consequences:** Coins, paid episodes, unlock mechanics and cash rewards are forbidden forever (AGENTS.md). The Ad Charter values live in code and are pinned by tests. Producer statements need server-side watched-minute counting. The web app must deploy as static files, and share previews must carry absolute URLs. A domain (~€10 a year) and, past the free tiers, Workers Paid ($5 a month) are the first costs; ad revenue arrives about a month later.
+
+**Revisit:** When the soft launch produces measured D1/D7, completion and ad yield. Replace every estimated number in `docs/business-model.md` with a measured one.
+
+---
+
 ## 2026-09-16 — Shell 10/10 interaction + typography lock
 
 **Decision:** Finish consumer shell craft before licensed content: (1) tap-to-unmute on media surface (first tap = sound, later = play/pause); (2) ActionRail + progress mount only on active slide; (3) self-hosted Syne/Manrope via `next/font/local` (Google `next/font` was emitting Arial-only Fallback faces); (4) next-episode `preload="auto"` + dynamic `<link rel=preload>` for next video/poster. Stand-in masters remain Signal Night only.

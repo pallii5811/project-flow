@@ -1,0 +1,10 @@
+# Line endings stay LF in the repository and in every checkout,
+# whatever core.autocrlf says on the machine.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.mp4 binary
+*.m4s binary
+*.woff2 binary

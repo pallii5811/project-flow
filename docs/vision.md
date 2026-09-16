@@ -28,11 +28,11 @@ OPEN APP → VIDEO STARTS → SWIPE → CONTINUE → FOLLOW → RETURN TOMORROW
 
 ## V0 surfaces (product constraints — not yet implemented)
 
-| ID | Surface | Priority |
-|----|---------|----------|
-| S1 | Feed | Dominates the product |
-| S2 | Continue strip | Overlay continuity |
-| S3 | Intent sheet | Secondary, never blocks feed |
+| ID  | Surface        | Priority                     |
+| --- | -------------- | ---------------------------- |
+| S1  | Feed           | Dominates the product        |
+| S2  | Continue strip | Overlay continuity           |
+| S3  | Intent sheet   | Secondary, never blocks feed |
 
 ### Explicitly excluded from V0 consumer path
 
@@ -60,14 +60,15 @@ This intent layer must never obstruct default playback.
 
 ## Three sensations (non-negotiable)
 
-| Sensation | Meaning |
-|-----------|---------|
-| **FAST** | First meaningful playback near zero. |
-| **BEAUTIFUL** | Cinematic, minimal, premium — even when free. |
+| Sensation     | Meaning                                             |
+| ------------- | --------------------------------------------------- |
+| **FAST**      | First meaningful playback near zero.                |
+| **BEAUTIFUL** | Cinematic, minimal, premium — even when free.       |
 | **ADDICTIVE** | Continuity is automatic; the next watch is obvious. |
 
 ## What we are not
 
+- Not a studio: we never produce. We distribute the best dramas made by others, free forever (`docs/business-model.md`).
 - Not “Netflix of short drama” (public positioning).
 - Not a coin casino.
 - Not a TikTok clone with drama skins.

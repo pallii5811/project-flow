@@ -4,7 +4,9 @@ Make short drama feel inevitable. **FAST · BEAUTIFUL · ADDICTIVE**
 
 Core loop: `OPEN → VIDEO STARTS → SWIPE → CONTINUE → FOLLOW → RETURN TOMORROW`
 
-This repo is a TypeScript monorepo. Prompt A established the foundation only — no feed, no video player, no monetization.
+A short-drama **distributor**: the best vertical dramas made by others, free for every viewer, forever. Business shape in [`docs/business-model.md`](docs/business-model.md), measurable rules in [`docs/standard.md`](docs/standard.md).
+
+This repo is a TypeScript monorepo. The web feed and player work end to end on a stand-in content pack; there is no monetization code yet.
 
 ## Structure
 
@@ -46,15 +48,15 @@ npm install
 
 ## Commands
 
-| Command | Purpose |
-|---------|---------|
-| `npm start` | Start Expo for `apps/mobile` |
-| `npm run android` | Expo Android |
-| `npm run ios` | Expo iOS (macOS) |
+| Command             | Purpose                             |
+| ------------------- | ----------------------------------- |
+| `npm start`         | Start Expo for `apps/mobile`        |
+| `npm run android`   | Expo Android                        |
+| `npm run ios`       | Expo iOS (macOS)                    |
 | `npm run typecheck` | Strict TypeScript across workspaces |
-| `npm run lint` | ESLint |
-| `npm test` | Vitest smoke tests |
-| `npm run format` | Prettier write |
+| `npm run lint`      | ESLint                              |
+| `npm test`          | Vitest smoke tests                  |
+| `npm run format`    | Prettier write                      |
 
 ## Environment
 
@@ -73,6 +75,8 @@ No secrets are required for Prompt A. Do not commit `.env`.
 
 ## Product docs
 
+- [`docs/business-model.md`](docs/business-model.md)
+- [`docs/standard.md`](docs/standard.md)
 - [`docs/vision.md`](docs/vision.md)
 - [`docs/product-principles.md`](docs/product-principles.md)
 - [`docs/ux-principles.md`](docs/ux-principles.md)
