@@ -1,0 +1,620 @@
+/* Cinematic feed — extreme craft pass (UI/UX + perceived speed) */
+
+.root {
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  min-height: 100dvh;
+  background: var(--flow-bg, #0b0b0c);
+  overflow: hidden;
+}
+
+.stageShell {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: #070708;
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-height: 100dvh;
+  background: var(--flow-media, #050505);
+  overflow: hidden;
+}
+
+@media (min-width: 768px) {
+  .stageShell {
+    align-items: center;
+    padding: 24px;
+    background:
+      radial-gradient(ellipse 55% 50% at 50% 42%, #121214 0%, #070708 72%);
+  }
+
+  .stage {
+    width: min(420px, calc((100dvh - 48px) * 9 / 16));
+    height: min(100dvh - 48px, calc(420px * 16 / 9));
+    border-radius: 20px;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.04),
+      0 24px 64px rgba(0, 0, 0, 0.55);
+    /* Contain paint for smoother scroll inside frame */
+    contain: layout paint;
+  }
+}
+
+.scroller {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-snap-type: y mandatory;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  background: var(--flow-media, #050505);
+  /* Hint compositor for snap scrolling */
+  will-change: scroll-position;
+}
+
+.scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.slide {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  background: var(--flow-media, #050505);
+  isolation: isolate;
+  content-visibility: auto;
+  contain-intrinsic-size: 100% 100dvh;
+}
+
+.media {
+  position: absolute;
+  inset: 0;
+  background: var(--flow-media, #050505);
+}
+
+.poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  transition: opacity var(--flow-fast, 120ms) var(--flow-ease-soft, ease);
+}
+
+.posterHidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.media video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+  background: transparent;
+}
+
+.scrimTop {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 22%;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.42) 0%,
+    rgba(0, 0, 0, 0.12) 55%,
+    transparent 100%
+  );
+  z-index: 2;
+}
+
+.scrimBottom {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 52%;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.92) 0%,
+    rgba(0, 0, 0, 0.55) 38%,
+    rgba(0, 0, 0, 0.16) 68%,
+    transparent 100%
+  );
+  z-index: 2;
+}
+
+.slideActive {
+  content-visibility: visible;
+}
+
+/* Full-stage tap: unmute first, then play/pause. Under chrome (z4+). */
+.surfaceHit {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.overlay {
+  position: absolute;
+  left: 0;
+  right: 68px;
+  bottom: 0;
+  z-index: 4;
+  padding: 0 18px calc(16px + env(safe-area-inset-bottom));
+  color: #f7f5f2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 100%;
+  pointer-events: none;
+  animation: overlayEnter 280ms var(--flow-ease-out, ease-out) both;
+}
+
+.overlayInactive {
+  opacity: 0.55;
+  animation: none;
+}
+
+@keyframes overlayEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.seriesTitle {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(26px, 6.2vw, 30px);
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: #faf8f4;
+  text-shadow: 0 2px 28px rgba(0, 0, 0, 0.65);
+  max-width: 14ch;
+}
+
+.hook {
+  margin: 0;
+  font-family: var(--font-body), sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--flow-ink-soft, rgba(247, 245, 242, 0.94));
+  white-space: pre-line;
+  max-width: 26ch;
+  text-shadow: 0 1px 18px rgba(0, 0, 0, 0.6);
+}
+
+.episodeLabel {
+  margin: 4px 0 0;
+  font-family: var(--font-body), sans-serif;
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--flow-muted, rgba(247, 245, 242, 0.4));
+}
+
+.progressEdge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.progressFill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(232, 220, 200, 0.55),
+    rgba(247, 245, 242, 0.9)
+  );
+  transform-origin: left center;
+  transition: transform 60ms linear;
+}
+
+.rail {
+  position: absolute;
+  right: 6px;
+  bottom: calc(100px + env(safe-area-inset-bottom));
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  animation: railEnter 320ms var(--flow-ease-out, ease-out) 60ms both;
+}
+
+@keyframes railEnter {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.railButton {
+  width: 46px;
+  height: 46px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(247, 245, 242, 0.88);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.55));
+  transition:
+    color var(--flow-fast, 120ms) var(--flow-ease-soft, ease),
+    transform var(--flow-fast, 120ms) var(--flow-ease-out, ease),
+    opacity var(--flow-fast, 120ms) ease;
+  opacity: 0.92;
+}
+
+.railButton:hover {
+  opacity: 1;
+  color: #fff;
+}
+
+.railButton:active {
+  transform: scale(0.86);
+}
+
+.railButton:focus-visible {
+  outline: 2px solid var(--flow-accent, #e8dcc8);
+  outline-offset: 2px;
+}
+
+.railButton[aria-pressed="true"] {
+  color: var(--flow-accent, #e8dcc8);
+  opacity: 1;
+}
+
+/* When muted, pulse unmute affordance — speed to first meaningful audio */
+.railButtonMute[aria-pressed="true"] {
+  animation: mutePulse 1.8s var(--flow-ease-soft, ease) infinite;
+}
+
+@keyframes mutePulse {
+  0%,
+  100% {
+    color: rgba(247, 245, 242, 0.88);
+    transform: scale(1);
+  }
+  50% {
+    color: var(--flow-accent, #e8dcc8);
+    transform: scale(1.06);
+  }
+}
+
+.railIcon {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+.railIconFilled {
+  fill: currentColor;
+  stroke: currentColor;
+}
+
+.media :global(video)::cue {
+  background: rgba(0, 0, 0, 0.58);
+  color: #faf8f4;
+  font-family: var(--font-body), sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.85);
+}
+
+.playGate {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.22);
+  animation: gateFade 180ms var(--flow-ease-out, ease-out) both;
+}
+
+@keyframes gateFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.playGateButton {
+  width: 72px;
+  height: 72px;
+  border: 1.5px solid rgba(247, 245, 242, 0.65);
+  border-radius: 999px;
+  background: rgba(8, 8, 10, 0.42);
+  color: #faf8f4;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition:
+    transform var(--flow-fast, 120ms) var(--flow-ease-out, ease),
+    background var(--flow-fast, 120ms) ease,
+    border-color var(--flow-fast, 120ms) ease,
+    box-shadow var(--flow-normal, 200ms) ease;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  animation: playPulse 2.2s var(--flow-ease-soft, ease) infinite;
+}
+
+@keyframes playPulse {
+  0%,
+  100% {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.35),
+      0 0 0 10px rgba(232, 220, 200, 0.08);
+  }
+}
+
+.playGateButton:hover {
+  background: rgba(8, 8, 10, 0.55);
+  border-color: rgba(247, 245, 242, 0.92);
+  transform: scale(1.04);
+}
+
+.playGateButton:active {
+  transform: scale(0.95);
+  animation: none;
+}
+
+.mediaFail {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.mediaFailText {
+  margin: 0;
+  max-width: 22ch;
+  font-family: var(--font-body), sans-serif;
+  font-size: 15px;
+  line-height: 22px;
+  color: rgba(247, 245, 242, 0.72);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+}
+
+.sheetBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.52);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: gateFade 160ms ease-out both;
+}
+
+.sheet {
+  width: 100%;
+  max-width: 420px;
+  padding: 20px 18px calc(24px + env(safe-area-inset-bottom));
+  background: #121214;
+  border-radius: 20px 20px 0 0;
+  color: #f4f3f1;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  animation: sheetUp 220ms var(--flow-ease-out, ease-out) both;
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(16px);
+    opacity: 0.85;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.sheetTitle {
+  margin: 0 0 14px;
+  font-family: var(--font-body), sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6f6d67;
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #1a1a1d;
+  color: #f4f3f1;
+  border-radius: 999px;
+  padding: 10px 16px;
+  min-height: 44px;
+  cursor: pointer;
+  font-family: var(--font-body), sans-serif;
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 500;
+  transition:
+    border-color var(--flow-fast, 120ms) ease,
+    background var(--flow-fast, 120ms) ease,
+    transform var(--flow-fast, 120ms) ease;
+}
+
+.chip:hover {
+  border-color: rgba(232, 220, 200, 0.5);
+}
+
+.chip:active {
+  transform: scale(0.97);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--flow-accent, #e8dcc8);
+  outline-offset: 2px;
+}
+
+.strip,
+.seriesEnd {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(36px + env(safe-area-inset-bottom));
+  z-index: 15;
+  padding: 16px 16px 14px;
+  border-radius: 16px;
+  background: rgba(10, 10, 12, 0.82);
+  color: #f4f3f1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  backdrop-filter: blur(14px) saturate(1.1);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  animation: sheetUp 200ms var(--flow-ease-out, ease-out) both;
+}
+
+.stripLabel,
+.seriesEndLabel {
+  margin: 0;
+  font-family: var(--font-body), sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #a8a69f;
+}
+
+.stripTitle,
+.seriesEndTitle {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.stripMeta,
+.seriesEndMeta {
+  margin: 0;
+  font-family: var(--font-body), sans-serif;
+  font-size: 13px;
+  color: #a8a69f;
+}
+
+.stripButton,
+.seriesEndButton {
+  align-self: flex-start;
+  margin-top: 6px;
+  border: none;
+  border-radius: 10px;
+  min-height: 44px;
+  padding: 10px 18px;
+  cursor: pointer;
+  font-family: var(--font-body), sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  transition:
+    opacity var(--flow-fast, 120ms) ease,
+    transform var(--flow-fast, 120ms) ease;
+}
+
+.stripButton:active,
+.seriesEndButton:active {
+  opacity: 0.88;
+  transform: scale(0.98);
+}
+
+.stripButton {
+  background: var(--flow-accent, #e8dcc8);
+  color: #141210;
+}
+
+.seriesEndButton {
+  background: #26262a;
+  color: #f4f3f1;
+}
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #a8a69f;
+  font-family: var(--font-body), sans-serif;
+  font-size: 15px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .rail,
+  .playGate,
+  .playGateButton,
+  .sheet,
+  .sheetBackdrop,
+  .strip,
+  .seriesEnd,
+  .railButtonMute[aria-pressed="true"] {
+    animation: none !important;
+  }
+
+  .poster {
+    transition: none;
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@project-flow/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@project-flow/analytics": "*",
+    "@project-flow/design-system": "*",
+    "@project-flow/feed-domain": "*",
+    "@project-flow/shared": "*",
+    "next": "15.5.7",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.7",
+    "typescript": "^5"
+  }
+}

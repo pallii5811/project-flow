@@ -1,0 +1,31 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "paths": {
+      "@project-flow/shared": [
+        "../../packages/shared/src/index.ts"
+      ],
+      "@project-flow/design-system": [
+        "../../packages/design-system/src/index.ts"
+      ],
+      "@project-flow/analytics": [
+        "../../packages/analytics/src/index.ts"
+      ],
+      "@project-flow/ui": [
+        "../../packages/ui/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/*.test.ts"
+  ]
+}

@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# Builds
+dist/
+build/
+.expo/
+.expo-shared/
+web-build/
+coverage/
+*.tsbuildinfo
+
+# Native
+ios/Pods/
+android/.gradle/
+android/app/build/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Logs / temp
+*.log
+npm-debug.log*
+tmp/
+.tmp/
+
+# Misc
+*.tgz
+.vercel
+expo-env.d.ts

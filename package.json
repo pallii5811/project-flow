@@ -1,0 +1,36 @@
+{
+  "name": "project-flow",
+  "private": true,
+  "version": "0.0.0",
+  "description": "PROJECT FLOW — short-drama consumer product monorepo",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "mobile": "npm run start -w @project-flow/mobile",
+    "start": "npm run start -w @project-flow/mobile",
+    "web": "npm run dev -w @project-flow/web",
+    "web:expo": "npm run web -w @project-flow/mobile",
+    "android": "npm run android -w @project-flow/mobile",
+    "ios": "npm run ios -w @project-flow/mobile",
+    "typecheck": "npm run typecheck -w @project-flow/shared && npm run typecheck -w @project-flow/design-system && npm run typecheck -w @project-flow/analytics && npm run typecheck -w @project-flow/ui && npm run typecheck -w @project-flow/feed-domain && npm run typecheck -w @project-flow/mobile && npm run typecheck -w @project-flow/web",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "build:web": "npm run build -w @project-flow/web"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "@types/node": "^22.13.10",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "~5.9.2",
+    "typescript-eslint": "^8.26.1",
+    "vitest": "^3.0.8"
+  }
+}
