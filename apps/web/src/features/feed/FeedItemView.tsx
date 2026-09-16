@@ -95,15 +95,9 @@ export function FeedItemView({
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  const resolved = useMemo(
-    () => videoProvider.resolve(item.playback),
-    [item.playback],
-  );
+  const resolved = useMemo(() => videoProvider.resolve(item.playback), [item.playback]);
 
-  const display = useMemo(
-    () => resolveDisplayCopy(item, locale),
-    [item, locale],
-  );
+  const display = useMemo(() => resolveDisplayCopy(item, locale), [item, locale]);
 
   const captionTrack = useMemo(
     () => selectCaptionTrack(item.captions, locale ?? item.language),
@@ -139,9 +133,7 @@ export function FeedItemView({
 
   const showPoster = !playing || failed || !active;
   const playableUrl = resolved.ok ? resolved.playback.url : "";
-  const posterUrl = resolved.ok
-    ? resolved.playback.posterUrl
-    : item.thumbnailUrl;
+  const posterUrl = resolved.ok ? resolved.playback.posterUrl : item.thumbnailUrl;
   const mountPlayer = resolved.ok && !failed && (active || preload !== "none");
 
   /** First tap while muted = unmute (emotional hit). Later taps = play/pause. */
@@ -187,6 +179,7 @@ export function FeedItemView({
               uri: playableUrl,
               poster: posterUrl,
               contentId: item.id,
+              mimeType: resolved.ok ? resolved.playback.mimeType : "",
             }}
             active={active && !failed}
             muted={muted}

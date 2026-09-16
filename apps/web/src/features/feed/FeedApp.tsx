@@ -67,15 +67,11 @@ function hashSeed(input: string): number {
   return h >>> 0;
 }
 
-export function FeedApp({
-  initialContentId,
-  deepLinkRoute,
-}: FeedAppProps): ReactElement {
+export function FeedApp({ initialContentId, deepLinkRoute }: FeedAppProps): ReactElement {
   const analytics = useMemo(() => getAnalyticsClient(), []);
   const sessionId = useMemo(() => getSessionId(), []);
   const anonymousUserId = useMemo(() => getAnonymousUserId(), []);
-  const locale =
-    typeof navigator !== "undefined" ? navigator.language : "en";
+  const locale = typeof navigator !== "undefined" ? navigator.language : "en";
   const flags = useMemo(
     () =>
       createLocalFeatureFlags({
@@ -169,8 +165,7 @@ export function FeedApp({
       openedTracked.current = true;
       analytics.track("page_view", {
         session_id: sessionId,
-        route:
-          typeof window !== "undefined" ? window.location.pathname : "/",
+        route: typeof window !== "undefined" ? window.location.pathname : "/",
       });
     }
     if (isDiagEnabled()) setDiagOpen(true);
@@ -207,12 +202,7 @@ export function FeedApp({
         episodeId: item.episodeId,
       });
     }
-  }, [
-    analytics,
-    deepLinkRoute,
-    editorialItems,
-    initialContentId,
-  ]);
+  }, [analytics, deepLinkRoute, editorialItems, initialContentId]);
 
   // Resume from localStorage (non-blocking). Deep link preserves resume for same episode.
   useEffect(() => {
@@ -225,10 +215,7 @@ export function FeedApp({
       setCaptionsOn(snapshot.captionsOn);
 
       if (initialContentId) {
-        if (
-          snapshot.contentId === initialContentId &&
-          isResumable(snapshot)
-        ) {
+        if (snapshot.contentId === initialContentId && isResumable(snapshot)) {
           setResumeOffer(snapshot);
           patchLaunchDiagnostics({ resumePositionMs: snapshot.positionMs });
         }
@@ -270,10 +257,7 @@ export function FeedApp({
             explorationEnabled: true,
           });
           if (cancelled) return;
-          const { items: nextItems } = materializeFeedItems(
-            result,
-            editorialItems,
-          );
+          const { items: nextItems } = materializeFeedItems(result, editorialItems);
           if (nextItems.length === 0) return;
 
           setItems((prev) => {
@@ -303,18 +287,15 @@ export function FeedApp({
     [items, index],
   );
 
-  // Warm next episode bytes while current plays (zero-gap swipe).
+  // Warm the next episode's poster. Its first seconds of video are warmed by
+  // the player itself (planHlsLoad), never the whole episode.
   useEffect(() => {
     if (!nextItem || typeof document === "undefined") return;
-    const videoHref = nextItem.playback.reference;
-    const posterHref =
-      nextItem.playback.posterReference || nextItem.thumbnailUrl;
+    const posterHref = nextItem.playback.posterReference || nextItem.thumbnailUrl;
     const links: HTMLLinkElement[] = [];
 
     const add = (rel: string, as: string, href: string, type?: string) => {
-      const existing = document.head.querySelector(
-        `link[data-flow-prefetch="${href}"]`,
-      );
+      const existing = document.head.querySelector(`link[data-flow-prefetch="${href}"]`);
       if (existing) return;
       const link = document.createElement("link");
       link.rel = rel;
@@ -326,7 +307,6 @@ export function FeedApp({
       links.push(link);
     };
 
-    add("preload", "video", videoHref, "video/mp4");
     add("preload", "image", posterHref);
 
     return () => {
@@ -376,14 +356,7 @@ export function FeedApp({
       pageStartTs: perf.get("page_start"),
       timeToFirstPlayMs: perf.timeToFirstPlay(),
     });
-  }, [
-    anonymousUserId,
-    captionsOn,
-    current,
-    perf,
-    prefetchIds,
-    sessionId,
-  ]);
+  }, [anonymousUserId, captionsOn, current, perf, prefetchIds, sessionId]);
 
   const persistResume = useCallback(
     async (snapshot: ResumeSnapshot) => {
@@ -395,12 +368,7 @@ export function FeedApp({
   );
 
   const emitWatchProgress = useCallback(
-    (
-      item: ContentItem,
-      positionMs: number,
-      durationMs: number,
-      force = false,
-    ) => {
+    (item: ContentItem, positionMs: number, durationMs: number, force = false) => {
       if (force) progressThrottle.forceNext();
       if (
         !force &&
@@ -476,21 +444,12 @@ export function FeedApp({
       progressThrottle.reset();
       setIndex(next);
     },
-    [
-      analytics,
-      emitWatchProgress,
-      index,
-      items,
-      perf,
-      progressById,
-      progressThrottle,
-    ],
+    [analytics, emitWatchProgress, index, items, perf, progressById, progressThrottle],
   );
 
   const handleTimeUpdate = useCallback(
     (item: ContentItem, positionMs: number, durationMs: number) => {
-      const progress =
-        durationMs > 0 ? Math.min(1, positionMs / durationMs) : 0;
+      const progress = durationMs > 0 ? Math.min(1, positionMs / durationMs) : 0;
       setProgressById((prev) =>
         prev[item.id] === progress ? prev : { ...prev, [item.id]: progress },
       );
@@ -585,8 +544,7 @@ export function FeedApp({
 
   const handleShare = useCallback(
     async (item: ContentItem) => {
-      const origin =
-        typeof window !== "undefined" ? window.location.origin : "";
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
       const shareId = createShareId();
       const url = buildShareUrl(catalog, item, origin, {
         utmSource: "share",
@@ -655,8 +613,7 @@ export function FeedApp({
           .slice(index + 1)
           .filter(
             (item) =>
-              item.id !== head.id &&
-              !rest.some((candidate) => candidate.id === item.id),
+              item.id !== head.id && !rest.some((candidate) => candidate.id === item.id),
           );
         return [head, ...rest, ...leftovers];
       });

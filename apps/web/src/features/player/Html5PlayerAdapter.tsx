@@ -1,11 +1,14 @@
 import type { CaptionTrack } from "@project-flow/feed-domain";
-import {
-  useEffect,
-  useRef,
-  type ReactElement,
-  type VideoHTMLAttributes,
-} from "react";
+import type Hls from "hls.js";
+import { useEffect, useRef, type ReactElement, type VideoHTMLAttributes } from "react";
 
+import {
+  chooseHlsEngine,
+  isHlsSource,
+  isSafariUserAgent,
+  planHlsLoad,
+  startQuality,
+} from "./hlsSupport";
 import type { PlayerAdapterEvents, VideoSource } from "./types";
 
 export type Html5PlayerAdapterProps = {
@@ -19,9 +22,28 @@ export type Html5PlayerAdapterProps = {
   events: PlayerAdapterEvents;
 };
 
+type HlsModule = typeof import("hls.js");
+
+/** One shared download of hls.js, started by the first adaptive source. */
+let hlsModulePromise: Promise<HlsModule> | null = null;
+function loadHls(): Promise<HlsModule> {
+  hlsModulePromise ??= import("hls.js/light");
+  return hlsModulePromise;
+}
+
+type NetworkInformationLike = { downlink?: number; saveData?: boolean };
+
+function networkHints(): { downlinkMbps?: number; saveData?: boolean } {
+  if (typeof navigator === "undefined") return {};
+  const connection = (navigator as Navigator & { connection?: NetworkInformationLike })
+    .connection;
+  return { downlinkMbps: connection?.downlink, saveData: connection?.saveData };
+}
+
 /**
  * HTML5 adapter — avoids remount on every render; listeners attached once.
  * Muted autoplay when active; visibility pause; single retry on error.
+ * Adaptive (HLS) sources play through hls.js, or natively on Safari.
  */
 export function Html5PlayerAdapter({
   source,
@@ -38,6 +60,8 @@ export function Html5PlayerAdapter({
   eventsRef.current = events;
   const activeRef = useRef(active);
   activeRef.current = active;
+  const preloadRef = useRef(preload);
+  preloadRef.current = preload;
   const seekRef = useRef(seekToMs);
   seekRef.current = seekToMs;
 
@@ -48,6 +72,9 @@ export function Html5PlayerAdapter({
   const attemptEmittedRef = useRef(false);
   const bufferingRef = useRef(false);
   const lastUriRef = useRef<string | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const hlsSegmentsStartedRef = useRef(false);
+  const sourceGenerationRef = useRef(0);
 
   // Attach listeners once — prevent leaks from rebinding on active/seek changes.
   useEffect(() => {
@@ -79,9 +106,7 @@ export function Html5PlayerAdapter({
 
     const onTimeUpdate = () => {
       if (!activeRef.current) return;
-      const durationMs = Number.isFinite(video.duration)
-        ? video.duration * 1000
-        : 0;
+      const durationMs = Number.isFinite(video.duration) ? video.duration * 1000 : 0;
       eventsRef.current.onTimeUpdate?.(video.currentTime * 1000, durationMs);
     };
 
@@ -121,6 +146,9 @@ export function Html5PlayerAdapter({
     };
 
     const onError = () => {
+      // hls.js reports its own errors (see attachHls); media element errors
+      // while it is attached are handled there.
+      if (hlsRef.current) return;
       if (!activeRef.current) return;
       if (!retriedRef.current) {
         retriedRef.current = true;
@@ -170,10 +198,122 @@ export function Html5PlayerAdapter({
     playEmittedRef.current = false;
     attemptEmittedRef.current = false;
     bufferingRef.current = false;
+    const generation = ++sourceGenerationRef.current;
+    destroyHls();
     video.poster = source.poster ?? "";
-    video.src = source.uri;
-    video.load();
-  }, [source.uri, source.poster, source.contentId]);
+
+    if (!isHlsSource(source.mimeType ?? "", source.uri)) {
+      video.src = source.uri;
+      video.load();
+      return;
+    }
+
+    const canPlayNativeHls = video.canPlayType("application/vnd.apple.mpegurl") !== "";
+    const isSafari =
+      typeof navigator !== "undefined" && isSafariUserAgent(navigator.userAgent);
+
+    if (canPlayNativeHls && isSafari) {
+      video.src = source.uri;
+      video.load();
+      return;
+    }
+
+    void loadHls()
+      .then(({ default: HlsClass }) => {
+        // A newer source or an unmount won the race: do nothing.
+        if (generation !== sourceGenerationRef.current || videoRef.current !== video)
+          return;
+        const engine = chooseHlsEngine({
+          canPlayNativeHls,
+          mediaSourceSupported: HlsClass.isSupported(),
+          isSafari,
+        });
+        if (engine === "native") {
+          video.src = source.uri;
+          video.load();
+          return;
+        }
+        if (engine === "unsupported") {
+          eventsRef.current.onError?.("Adaptive video is not supported here", 4);
+          return;
+        }
+        attachHls(HlsClass, video, source.uri);
+      })
+      .catch(() => {
+        if (generation !== sourceGenerationRef.current) return;
+        // The player code could not be downloaded: a network problem.
+        eventsRef.current.onError?.("Video engine failed to load", 2);
+      });
+  }, [source.uri, source.poster, source.contentId, source.mimeType]);
+
+  function attachHls(
+    HlsClass: HlsModule["default"],
+    video: HTMLVideoElement,
+    uri: string,
+  ) {
+    const plan = planHlsLoad(activeRef.current, preloadRef.current);
+    const quality = startQuality(networkHints());
+    const hls = new HlsClass({
+      autoStartLoad: false,
+      startLevel: -1,
+      capLevelToPlayerSize: true,
+      abrEwmaDefaultEstimate: quality.estimateBps,
+      maxBufferLength: plan.targetBufferSeconds,
+      maxMaxBufferLength: plan.maxBufferSeconds,
+      backBufferLength: 10,
+    });
+    hlsRef.current = hls;
+    hlsSegmentsStartedRef.current = false;
+
+    let networkRetried = false;
+    let mediaRecovered = false;
+
+    hls.on(HlsClass.Events.MANIFEST_PARSED, () => {
+      if (quality.capToLowest) hls.autoLevelCapping = 0;
+      applyHlsPlan();
+    });
+    hls.on(HlsClass.Events.ERROR, (_event, data) => {
+      if (!data.fatal) return;
+      if (data.type === HlsClass.ErrorTypes.NETWORK_ERROR && !networkRetried) {
+        networkRetried = true;
+        hls.startLoad();
+        return;
+      }
+      if (data.type === HlsClass.ErrorTypes.MEDIA_ERROR && !mediaRecovered) {
+        mediaRecovered = true;
+        hls.recoverMediaError();
+        return;
+      }
+      if (!activeRef.current) return;
+      const code = data.type === HlsClass.ErrorTypes.NETWORK_ERROR ? 2 : 3;
+      eventsRef.current.onError?.(data.details, code);
+    });
+
+    hls.loadSource(uri);
+    hls.attachMedia(video);
+  }
+
+  /** Current fully warm, next only its first seconds, previous no media. */
+  function applyHlsPlan() {
+    const hls = hlsRef.current;
+    if (!hls) return;
+    const plan = planHlsLoad(activeRef.current, preloadRef.current);
+    hls.config.maxBufferLength = plan.targetBufferSeconds;
+    hls.config.maxMaxBufferLength = plan.maxBufferSeconds;
+    if (plan.load === "segments" && !hlsSegmentsStartedRef.current) {
+      hlsSegmentsStartedRef.current = true;
+      hls.startLoad(-1);
+    }
+  }
+
+  function destroyHls() {
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
+    hlsSegmentsStartedRef.current = false;
+  }
+
+  // Tear down the adaptive engine with the component.
+  useEffect(() => () => destroyHls(), []);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -185,6 +325,7 @@ export function Html5PlayerAdapter({
     const video = videoRef.current;
     if (!video) return;
     video.preload = preload;
+    applyHlsPlan();
   }, [preload]);
 
   useEffect(() => {
@@ -200,6 +341,7 @@ export function Html5PlayerAdapter({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    applyHlsPlan();
     if (active) {
       void tryPlay(video);
     } else {
@@ -231,7 +373,10 @@ export function Html5PlayerAdapter({
     }
     try {
       await video.play();
-    } catch {
+    } catch (error) {
+      // AbortError = a new load interrupted this play() (e.g. hls.js attaching
+      // its media source); canplay will try again. Only a refusal is a block.
+      if (error instanceof DOMException && error.name === "AbortError") return;
       eventsRef.current.onAutoplayBlocked?.();
     }
   }

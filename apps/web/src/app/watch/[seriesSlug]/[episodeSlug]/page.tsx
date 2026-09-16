@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { preload } from "react-dom";
 
 import {
   findBySlugs,
@@ -68,6 +69,7 @@ export default async function WatchPage({ params }: WatchPageProps) {
   const resolved = await params;
   const item = findPublished(resolved);
   if (!item) notFound();
+  preload(item.thumbnailUrl, { as: "image", fetchPriority: "high" });
 
   return <FeedApp initialContentId={item.id} deepLinkRoute={watchPath(resolved)} />;
 }

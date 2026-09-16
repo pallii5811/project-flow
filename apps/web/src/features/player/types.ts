@@ -2,6 +2,8 @@ export type VideoSource = {
   uri: string;
   poster?: string;
   contentId: string;
+  /** Tells an adaptive playlist (HLS) from a single file. */
+  mimeType?: string;
 };
 
 export type PlayerAdapterEvents = {

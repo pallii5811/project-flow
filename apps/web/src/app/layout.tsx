@@ -56,21 +56,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${fontDisplay.variable} ${fontBody.variable}`}>
-      <head>
-        {/* Critical first episode — warm cache before FeedApp hydrates */}
-        <link
-          rel="preload"
-          as="image"
-          href="/content/series/signal-night/posters/episode-1.jpg"
-          fetchPriority="high"
-        />
-        <link
-          rel="preload"
-          as="video"
-          href="/content/series/signal-night/video/episode-1.mp4"
-          type="video/mp4"
-        />
-      </head>
       <body
         style={{
           background: darkColors.background,

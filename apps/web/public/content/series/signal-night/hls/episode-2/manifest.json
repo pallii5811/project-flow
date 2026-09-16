@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "source": "episode-2.mp4",
+  "sourceSha256": "3dc5406cedc0af664bb9b0ee7d6daf565dd1a1d2aea5eaca1376c7ffb111f0b1",
+  "durationMs": 10000,
+  "width": 720,
+  "height": 1280,
+  "fps": 25,
+  "hasAudio": false,
+  "segmentSeconds": 2,
+  "renditions": [
+    {
+      "name": "v0",
+      "height": 640,
+      "maxrateKbps": 600,
+      "audioKbps": null,
+      "segments": 5,
+      "bytes": 170404,
+      "averageKbps": 136
+    },
+    {
+      "name": "v1",
+      "height": 960,
+      "maxrateKbps": 1400,
+      "audioKbps": null,
+      "segments": 5,
+      "bytes": 416264,
+      "averageKbps": 333
+    },
+    {
+      "name": "v2",
+      "height": 1280,
+      "maxrateKbps": 2500,
+      "audioKbps": null,
+      "segments": 5,
+      "bytes": 1052350,
+      "averageKbps": 842
+    }
+  ],
+  "mbPerMinuteLowest": 1.02,
+  "ffmpeg": "ffmpeg version 8.0.1-full_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers"
+}

@@ -20,13 +20,21 @@ const PACK = "/content/series/signal-night";
 const W = 720;
 const H = 1280;
 const ASPECT = W / H;
+/** Measured by scripts/package-episode.mjs (hls/episode-N/manifest.json). */
 const DURATION_MS = 10_000;
 
-function playbackFor(episodeFile: string, expiresAt: string | null = null): PlaybackDescriptor {
+/**
+ * Adaptive HLS produced by scripts/package-episode.mjs from the masters in
+ * content/series/signal-night/masters/.
+ */
+function playbackFor(
+  episodeFile: string,
+  expiresAt: string | null = null,
+): PlaybackDescriptor {
   return {
-    provider: "static",
-    reference: `${PACK}/video/${episodeFile}.mp4`,
-    mimeType: "video/mp4",
+    provider: "hls",
+    reference: `${PACK}/hls/${episodeFile}/master.m3u8`,
+    mimeType: "application/vnd.apple.mpegurl",
     durationMs: DURATION_MS,
     width: W,
     height: H,
@@ -136,7 +144,11 @@ function makeItem(opts: {
     durationMs: pb.durationMs,
     language: "en",
     defaultLocale: "en",
-    localizedMetadata: enMeta(opts.title, opts.hook, `${opts.series.title} · ${opts.title}`),
+    localizedMetadata: enMeta(
+      opts.title,
+      opts.hook,
+      `${opts.series.title} · ${opts.title}`,
+    ),
     order: opts.order,
     genres: ["thriller", "drama"],
     tropes: ["mystery", "night"],

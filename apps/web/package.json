@@ -14,6 +14,7 @@
     "@project-flow/design-system": "*",
     "@project-flow/feed-domain": "*",
     "@project-flow/shared": "*",
+    "hls.js": "1.6.19",
     "next": "15.5.7",
     "react": "19.2.3",
     "react-dom": "19.2.3"

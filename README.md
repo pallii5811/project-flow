@@ -48,17 +48,22 @@ npm install
 
 ## Commands
 
-| Command              | Purpose                                                             |
-| -------------------- | ------------------------------------------------------------------- |
-| `npm start`          | Start Expo for `apps/mobile`                                        |
-| `npm run android`    | Expo Android                                                        |
-| `npm run ios`        | Expo iOS (macOS)                                                    |
-| `npm run typecheck`  | Strict TypeScript across workspaces                                 |
-| `npm run lint`       | ESLint + invisible control-byte scan                                |
-| `npm test`           | Vitest suite                                                        |
-| `npm run format`     | Prettier write                                                      |
-| `npm run export:web` | Checked static export for deploy (see below)                        |
-| `npm run serve:web`  | Serve `apps/web/out` like Cloudflare Pages on http://localhost:3100 |
+| Command              | Purpose                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------ |
+| `npm start`          | Start Expo for `apps/mobile`                                                                           |
+| `npm run android`    | Expo Android                                                                                           |
+| `npm run ios`        | Expo iOS (macOS)                                                                                       |
+| `npm run typecheck`  | Strict TypeScript across workspaces                                                                    |
+| `npm run lint`       | ESLint + invisible control-byte scan                                                                   |
+| `npm test`           | Vitest suite                                                                                           |
+| `npm run format`     | Prettier write                                                                                         |
+| `npm run export:web` | Checked static export for deploy (see below)                                                           |
+| `npm run serve:web`  | Serve `apps/web/out` like Cloudflare Pages on http://localhost:3100                                    |
+| `npm run e2e:web`    | Real Chrome, phone profile: open → play → preload budget → swipe → deep link → 404 (run after a build) |
+
+## Packaging a series
+
+`node scripts/package-episode.mjs <master> <output-dir>` turns a vertical master (at least 1080×1920) into adaptive HLS with 2-second segments, a poster and a `manifest.json` of measured facts. It refuses non-vertical or under-resolution masters, and any ladder whose lightest rung costs more than 5 MB per watched minute. Example: `content/series/signal-night/README.md`.
 
 ## Deploy — Cloudflare Pages (free tier)
 

@@ -4,6 +4,27 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-16 — Adaptive HLS delivery, capped preload, real-browser gate
+
+**Decision:** Episodes ship as HLS: 2-second fMP4 segments, a keyframe every 2 s, and a vertical ladder of 640/960/1280/1920 lines that never upscales. `scripts/package-episode.mjs` produces them from a master and records measured facts in `manifest.json`. The web player uses **hls.js 1.6.19**, pinned exactly: the mature 1.6 line, while 1.7.3 was five days old. It loads the light build lazily, only when the first adaptive source mounts. Safari keeps its native HLS engine. Preload: the active episode buffers up to 30 s, the next one only its first **4 s**, and the previous one no media. `npm run e2e:web` drives the system Chrome through **playwright-core 1.63.0** (no browser download) and fails when that contract breaks. MP4 masters of the stand-in pack moved out of `public/`.
+
+**Why:** With progressive MP4 the next episode is downloaded whole before anyone swipes to it (measured: 2 full files at a cold open). On real episodes of 60–120 s that means megabytes per viewer that nobody watches, and a single quality that stalls on slow networks. Adaptive segments bound both.
+
+**Consequences:**
+
+- hls.js weighs 109 kB gzipped and is fetched only when needed: first-load JS went from 125 to 126 kB.
+- Measured on the stand-in pack: the lightest rung costs 0.95–1.02 MB per minute. Local reference run: first playing at 585 ms, swipe to playing at 8 ms.
+- A trap found by measuring: hls.js treats `maxBufferLength` as a floor, so the next episode was downloaded whole until `maxMaxBufferLength` was capped. The e2e run now catches it (sabotage run: red on seg_2, seg_3, seg_4).
+- A play() interrupted by a new load (AbortError) no longer counts as blocked autoplay, so no play gate flashes while hls.js attaches.
+
+**Revisit:**
+
+- When Safari/iOS is tested on a device (the native path is untested).
+- When real series expose rung choices at startup: the first 2 s currently come from the lowest rung, a side effect of hls.js bandwidth testing.
+- When `NEXT_EPISODE_WARM_SECONDS` should follow measured swipe behavior.
+
+---
+
 ## 2026-09-16 — Distributor only, free forever, Ad Charter, zero owner cash
 
 **Decision (owner):** PROJECT FLOW is a **distributor** of vertical dramas made by others and never produces. Viewing is **free forever**. Revenue comes from series sponsors, shop-the-scene commissions and ad breaks capped by the **Ad Charter**: nothing in the first 10 watched minutes of a session, only at episode boundaries, at most 30 s per break and 180 s per viewing hour, contextual targeting only. Producers get **50%** of market revenue pro-rata to verified watched minutes, non-exclusive, with "second life" catalog titles preferred. The owner puts in **zero personal cash**: free tiers that allow commercial use, pay-per-use only. Video is delivered from zero-egress storage (Cloudflare R2), the site is served as static files (Cloudflare Pages), and events are collected by Workers + D1.

@@ -3,11 +3,7 @@
  * Consumer feed only receives published, validated items.
  */
 
-export type ContentStatus =
-  | "draft"
-  | "published"
-  | "unpublished"
-  | "expired";
+export type ContentStatus = "draft" | "published" | "unpublished" | "expired";
 
 export type PlaybackProviderKind = "static" | "cdn" | "signed" | "hls";
 
@@ -16,7 +12,7 @@ export type PreloadHint = "none" | "metadata" | "auto";
 /** Storage/provider-agnostic playback description — not a raw CDN leak into UI. */
 export type PlaybackDescriptor = {
   provider: PlaybackProviderKind;
-  /** Provider-relative reference (e.g. `/content/series/.../video/episode-1.mp4`). */
+  /** Provider-relative reference (e.g. `/content/series/.../hls/episode-1/master.m3u8`). */
   reference: string;
   mimeType: string;
   durationMs: number;
