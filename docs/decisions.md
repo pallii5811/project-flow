@@ -4,6 +4,22 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-17 — Feed at scale: windowed slides, catalog as static JSON, early hls.js
+
+**Decision:** The feed list holds a page of 40 episodes (`FEED_PAGE_SIZE`), extended from catalog order when the viewer is within 10 of its end; it never holds the whole catalog. Only slides in [index−2, index+2] render poster and player; the rest are empty boxes that keep their scroll-snap point, and non-active posters use `loading="lazy"`. Each page's HTML carries only the target episode and the next one, inlined, so first play never waits for anything else. The catalog reaches the browser as `catalog/feed.json`, written at build time by a `force-static` route handler with only the fields the feed shows, and fetched after the first `playing` event (earlier only when something needs it: a refused autoplay, a playback error, a resumed episode outside the page, an intent chip, the end of the last listed slide; at the latest after 20 s). The recommended re-rank runs on that catalog when the main thread is idle and only replaces slides after the next one. Playback progress lives in a small store read by the progress bar only, and slides are memoized with stable handlers. hls.js is no longer discovered after hydration: an inline script preloads its chunk and the episode playlist (the chunk name is written into the export by `scripts/link-hls-engine.mjs`), and the player module starts the import at load; Safari and browsers without Media Source skip both. The TypeScript catalog in `packages/feed-domain` stays the source until series manifests replace it.
+
+**Why:** Measured on a stress export of 605 episodes (`npm run build:web:stress`): every open requested 605 posters, rendered 605 slides with media, and every HTML file weighed 408 kB (254 MB export, growing as N²). After: 3 posters, at most 5 slides with media, 16–18 kB per page whatever the catalog size, 30 MB export. Numbers in `docs/standard.md` §3.
+
+**Consequences:**
+
+- `npm run build:web:stress` (default 600 extra episodes, output in `apps/web/out-stress`) plus `npm run e2e:web:scale` gate the scale budgets; `scripts/deploy-checks.mjs` refuses a stress catalog.
+- The catalog file grows with the catalog: 3.4 MB, 78 kB gzipped, at 3,000 generated episodes. It is off the first-play path.
+- This supersedes "loads the light build lazily, only when the first adaptive source mounts" in the HLS entry below.
+
+**Revisit:** When series manifests land: shard the catalog file per series.
+
+---
+
 ## 2026-09-16 — Launch gated on content critical mass, English first
 
 **Decision (owner):** Go online only with the quantity and quality of content needed to reach critical mass from day one. The gate, estimated in `docs/content-strategy.md`:

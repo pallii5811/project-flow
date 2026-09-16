@@ -248,6 +248,7 @@ describe("recommendation at scale", () => {
       analytics: noAnalytics,
       sessionId: "s",
     });
+    const started = performance.now();
     const result = await service.getOrderedItems({
       sessionId: "s",
       language: "en",
@@ -260,7 +261,33 @@ describe("recommendation at scale", () => {
       diversityEnabled: true,
       explorationEnabled: true,
     });
+    const elapsed = performance.now() - started;
     expect(result.items).toHaveLength(40);
     expect(result.items[0]?.contentId).toBe("item_signal_2");
+    // Measured 2026-09-17 on the dev machine: 37 ms. Loose bound for a slow
+    // CI machine; the feed runs this after first play, when the main thread
+    // is idle.
+    expect(elapsed).toBeLessThan(1_000);
+  });
+
+  it("keeps the language pass linear in the number of candidates", () => {
+    const base = getLaunchFeedCatalog().items[0]!;
+    const count = 120_000;
+    const byId = new Map<string, ContentItem>();
+    const ranked: RecommendationCandidate[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const id = `c${i}`;
+      byId.set(id, { ...base, id, language: i % 2 === 0 ? "en" : "es" });
+      ranked.push(candidate(id));
+    }
+    const started = performance.now();
+    const ordered = preferLanguage(ranked, byId, "en");
+    const elapsed = performance.now() - started;
+    expect(ordered).toHaveLength(count);
+    expect(ordered[count / 2 - 1]?.contentId).toBe(`c${count - 2}`);
+    expect(ordered[count / 2]?.contentId).toBe("c1");
+    // Measured 2026-09-17 on the dev machine: the includes-based version took
+    // 1,893 ms on these 120,000 candidates, this single pass 33 ms.
+    expect(elapsed).toBeLessThan(400);
   });
 });
