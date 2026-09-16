@@ -15,7 +15,7 @@
     "android": "npm run android -w @project-flow/mobile",
     "ios": "npm run ios -w @project-flow/mobile",
     "typecheck": "npm run typecheck -w @project-flow/shared && npm run typecheck -w @project-flow/design-system && npm run typecheck -w @project-flow/analytics && npm run typecheck -w @project-flow/ui && npm run typecheck -w @project-flow/feed-domain && npm run typecheck -w @project-flow/mobile && npm run typecheck -w @project-flow/web",
-    "lint": "eslint .",
+    "lint": "eslint . && node scripts/check-control-bytes.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write .",

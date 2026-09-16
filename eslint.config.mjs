@@ -11,11 +11,18 @@ export default tseslint.config(
       "apps/mobile/babel.config.js",
       "apps/mobile/metro.config.js",
       "apps/web/.next/**",
+      "apps/web/out/**",
       "apps/web/next-env.d.ts",
     ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: { console: "readonly", process: "readonly", URL: "readonly" },
+    },
+  },
   {
     files: ["**/*.{ts,tsx}"],
     rules: {
