@@ -8,16 +8,16 @@ measured, it is not part of the standard yet.
 Competitor baseline (verified 2026-09-16, TheWrap): the leading apps give the first 8–10
 episodes free, then paywall with coins or subscriptions of up to $19.99 a week.
 
-| Our rule                                                                        | Status 2026-09-16                                                         |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Every episode free, forever. No coins, unlocks or tasks                         | Holds by design: no payment code exists                                   |
-| Open a link and the episode is already playing. No install, login or onboarding | Holds. Measured: about 2 s to playback on a local production build        |
-| Ads only inside the Ad Charter (section 2)                                      | Written as rules. Code in progress. No ads shown                          |
-| A shared link opens the exact episode, with a correct preview card              | **Broken**: preview image points to localhost (measured). Fix in progress |
-| Contextual ads only, no personal profiling                                      | Holds by design                                                           |
-| Picture adapts to the network; nothing downloaded beyond current + next episode | **Not yet.** Single-file MP4, and 4 files fetched at open (measured)      |
-| Subtitles in the viewer's language                                              | Partial: English, and Spanish on one episode                              |
-| Reasons to return tomorrow (follow survives reload, new-episode alerts)         | **Not yet.** Like and follow live in memory only                          |
+| Our rule                                                                        | Status 2026-09-16                                                                |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Every episode free, forever. No coins, unlocks or tasks                         | Holds by design: no payment code exists                                          |
+| Open a link and the episode is already playing. No install, login or onboarding | Holds. Measured: about 2 s to playback on a local production build               |
+| Ads only inside the Ad Charter (section 2)                                      | Enforced in code: 26 tests, each rule proven by a sabotage run. No ads shown yet |
+| A shared link opens the exact episode, with a correct preview card              | **Broken**: preview image points to localhost (measured). Fix in progress        |
+| Contextual ads only, no personal profiling                                      | Holds by design                                                                  |
+| Picture adapts to the network; nothing downloaded beyond current + next episode | **Not yet.** Single-file MP4, and 4 files fetched at open (measured)             |
+| Subtitles in the viewer's language                                              | Partial: English, and Spanish on one episode                                     |
+| Reasons to return tomorrow (follow survives reload, new-episode alerts)         | **Not yet.** Like and follow live in memory only                                 |
 
 A row turns green only with evidence: a test, a build artifact, or a production metric.
 
@@ -27,16 +27,16 @@ Enforced by `evaluateAdBreak` in `packages/feed-domain/src/ads/adCharter.ts`. Th
 pinned by tests, so changing one requires a new entry in [`docs/decisions.md`](decisions.md)
 and a deliberate test change.
 
-| Rule                                         | Value                                                                            |
-| -------------------------------------------- | -------------------------------------------------------------------------------- |
-| Ad-free grace at the start of a session      | first **10 watched minutes**                                                     |
-| Watched time between two breaks              | at least **10 minutes**                                                          |
-| Longest break                                | **30 seconds**                                                                   |
-| Ad time per hour of viewing (rolling window) | at most **180 seconds**                                                          |
-| Where                                        | only at an **episode boundary**                                                  |
-| Sponsor card                                 | at most **3 seconds**, once per series per session, counts toward the hourly cap |
-| Session reset                                | after **30 minutes** without watching                                            |
-| Targeting                                    | contextual only: series, genre, language, country                                |
+| Rule                                         | Value                                                                                                                                  |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Ad-free grace at the start of a session      | first **10 watched minutes**                                                                                                           |
+| Watched time between two interruptions       | at least **10 minutes**, whatever their kind                                                                                           |
+| Longest break                                | **30 seconds**                                                                                                                         |
+| Ad time per hour of viewing (rolling window) | at most **180 seconds**                                                                                                                |
+| Where                                        | only at an **episode boundary**                                                                                                        |
+| Sponsor card                                 | at most **3 seconds**, once per series per session, only when a series starts; obeys the same grace, spacing and hourly cap as a break |
+| Session reset                                | after **30 minutes** without watching                                                                                                  |
+| Targeting                                    | contextual only: series, genre, language, country                                                                                      |
 
 Never:
 

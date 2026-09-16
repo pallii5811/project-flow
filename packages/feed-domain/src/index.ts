@@ -34,18 +34,17 @@ export {
   getLaunchFeedCatalog,
 } from "./data/catalog";
 
-export type { FeedSource, DeterministicFeedSourceOptions } from "./source/deterministicFeedSource";
+export type {
+  FeedSource,
+  DeterministicFeedSourceOptions,
+} from "./source/deterministicFeedSource";
 export { createDeterministicFeedSource } from "./source/deterministicFeedSource";
 
 export type { NextEpisodeResolution } from "./continuation/resolveNextInSeries";
 export { resolveNextInSeries } from "./continuation/resolveNextInSeries";
 
 export type { FeedWindow } from "./state/feedLogic";
-export {
-  getFeedWindow,
-  resolveContinuation,
-  getPrefetchIds,
-} from "./state/feedLogic";
+export { getFeedWindow, resolveContinuation, getPrefetchIds } from "./state/feedLogic";
 
 export type { ResumeSnapshot, ResumeStore } from "./resume/resumeStore";
 export {
@@ -106,12 +105,27 @@ export { isPlayableItem } from "./playback/isPlayable";
 
 export { resolveLocalizedStrings, resolveDisplayCopy } from "./i18n/resolveLocale";
 export { selectCaptionTrack } from "./captions/selectCaptionTrack";
-export {
-  createWatchProgressThrottle,
-} from "./analytics/watchProgress";
+export { createWatchProgressThrottle } from "./analytics/watchProgress";
 export type {
   WatchProgressEmitter,
   WatchProgressSample,
 } from "./analytics/watchProgress";
+export {
+  AD_CHARTER,
+  createAdSession,
+  evaluateAdBreak,
+  evaluateSponsorCard,
+  recordInterruption,
+  recordWatchedTime,
+} from "./ads/adCharter";
+export type {
+  AdDecision,
+  AdDenialReason,
+  AdInterruptionKind,
+  AdLedgerEntry,
+  AdPlacementContext,
+  AdSessionState,
+  SponsorPlacementContext,
+} from "./ads/adCharter";
 export { logContentEvent } from "./observability/contentLog";
 export type { ContentLogEvent, ContentLogFields } from "./observability/contentLog";
