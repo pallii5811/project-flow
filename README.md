@@ -100,6 +100,7 @@ No secrets are required for Prompt A. Do not commit `.env`.
 
 - [`docs/business-model.md`](docs/business-model.md)
 - [`docs/standard.md`](docs/standard.md)
+- [`docs/content-strategy.md`](docs/content-strategy.md)
 - [`docs/vision.md`](docs/vision.md)
 - [`docs/product-principles.md`](docs/product-principles.md)
 - [`docs/ux-principles.md`](docs/ux-principles.md)

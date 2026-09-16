@@ -6,18 +6,19 @@ Never build everything at once. Stop gates are mandatory.
 
 Business shape and rules: `docs/business-model.md`, `docs/standard.md`.
 
-| Step | Deliverable                                                                               | Status |
-| ---- | ----------------------------------------------------------------------------------------- | ------ |
-| F1   | Repository in git                                                                         | DONE   |
-| F2   | Business model + Standard written as law (docs, AGENTS.md, decision log)                  | DONE   |
-| F3   | Ad Charter as pure, tested code (`evaluateAdBreak`)                                       | DONE   |
-| F4   | Watched minutes + producer statements as pure, tested code                                | DONE   |
-| F5   | Share previews with absolute URLs + static export for Cloudflare Pages + build-time guard | DONE   |
-| F6   | Adaptive video: HLS packaging script + player + current/next-only preload                 | DONE   |
-| F7   | Event collector (Workers + D1) — needs the owner's Cloudflare account                     | todo   |
-| F8   | Rights metadata per series: territories, languages, window, producer of record            | todo   |
+| Step | Deliverable                                                                                                | Status |
+| ---- | ---------------------------------------------------------------------------------------------------------- | ------ |
+| F1   | Repository in git                                                                                          | DONE   |
+| F2   | Business model + Standard written as law (docs, AGENTS.md, decision log)                                   | DONE   |
+| F3   | Ad Charter as pure, tested code (`evaluateAdBreak`)                                                        | DONE   |
+| F4   | Watched minutes + producer statements as pure, tested code                                                 | DONE   |
+| F5   | Share previews with absolute URLs + static export for Cloudflare Pages + build-time guard                  | DONE   |
+| F6   | Adaptive video: HLS packaging script + player + current/next-only preload                                  | DONE   |
+| F7   | Event collector (Workers + D1) — needs the owner's Cloudflare account                                      | todo   |
+| F8   | Rights metadata per series: territories, languages, window, producer of record                             | todo   |
+| C1   | Content gate: 45–60 English series in 3 clusters + 12–20 new per month signed (`docs/content-strategy.md`) | todo   |
 
-**Stop.** Soft launch needs 3–5 licensed series and F5–F7 live. Ads stay off until D1/D7 are measured.
+**Stop.** No public launch before the content gate C1 is met (owner decision 2026-09-16). Closed beta first, with the same catalog and zero ads, to measure D1/D7, series completion and catalog exhaustion. F5–F8 must be live for the beta.
 
 ## Phase 1 — Foundation (STOP & TEST)
 

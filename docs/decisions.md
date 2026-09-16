@@ -4,6 +4,30 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-16 — Launch gated on content critical mass, English first
+
+**Decision (owner):** Go online only with the quantity and quality of content needed to reach critical mass from day one. The gate, estimated in `docs/content-strategy.md`:
+
+- 45–60 English series across three clusters (billionaire/CEO romance, revenge & comeback, werewolf/supernatural romance);
+- at least 10–15 proven performers;
+- 12–20 new series signed per month for the first three months;
+- rights and technical gates at 100%.
+
+A closed beta with zero ads comes before any public push.
+
+**Why:** Leaders hold libraries of thousands to tens of thousands of series (NetShort 73,655), so volume cannot be matched with zero owner cash; the catalog must instead never run dry for a single viewer. The benchmarks: 25 minutes a day worldwide and 35.7 for ReelShort's US users (Sensor Tower), series of 90–150 minutes. A public push into a thin catalog spends each viewer's first impression.
+
+**Consequences:** Next work is content acquisition, not features:
+
+- outreach to catalog licensors with non-exclusive AVOD rights (Face Production Media, SeaStar Film);
+- outreach to independent producers without distribution.
+
+If proven titles require minimum guarantees, revenue share alone cannot meet the gate. That is an owner decision: uplift, funding partner or smaller launch. The gates are never lowered.
+
+**Revisit:** When the first licensors answer with terms, and when beta data replaces the model's assumptions (completion 1 in 3, 9 series a month per engaged viewer).
+
+---
+
 ## 2026-09-16 — Adaptive HLS delivery, capped preload, real-browser gate
 
 **Decision:** Episodes ship as HLS: 2-second fMP4 segments, a keyframe every 2 s, and a vertical ladder of 640/960/1280/1920 lines that never upscales. `scripts/package-episode.mjs` produces them from a master and records measured facts in `manifest.json`. The web player uses **hls.js 1.6.19**, pinned exactly: the mature 1.6 line, while 1.7.3 was five days old. It loads the light build lazily, only when the first adaptive source mounts. Safari keeps its native HLS engine. Preload: the active episode buffers up to 30 s, the next one only its first **4 s**, and the previous one no media. `npm run e2e:web` drives the system Chrome through **playwright-core 1.63.0** (no browser download) and fails when that contract breaks. MP4 masters of the stand-in pack moved out of `public/`.
