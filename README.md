@@ -29,7 +29,7 @@ npm run web
 ```
 
 Opens **http://localhost:3000** — open → watch → swipe.  
-Deep links: `/watch/the-billionaires-secret/episode-1` · `/watch/the-last-vow/episode-1` · `/watch/house-of-lies/episode-1`
+Deep links: `/watch/signal-night/episode-1` … `/watch/signal-night/episode-5` (stand-in pack, not licensed drama)
 
 Expo mobile preview (not the launch surface): `npm run web:expo`
 
@@ -48,15 +48,33 @@ npm install
 
 ## Commands
 
-| Command             | Purpose                             |
-| ------------------- | ----------------------------------- |
-| `npm start`         | Start Expo for `apps/mobile`        |
-| `npm run android`   | Expo Android                        |
-| `npm run ios`       | Expo iOS (macOS)                    |
-| `npm run typecheck` | Strict TypeScript across workspaces |
-| `npm run lint`      | ESLint                              |
-| `npm test`          | Vitest smoke tests                  |
-| `npm run format`    | Prettier write                      |
+| Command              | Purpose                                                             |
+| -------------------- | ------------------------------------------------------------------- |
+| `npm start`          | Start Expo for `apps/mobile`                                        |
+| `npm run android`    | Expo Android                                                        |
+| `npm run ios`        | Expo iOS (macOS)                                                    |
+| `npm run typecheck`  | Strict TypeScript across workspaces                                 |
+| `npm run lint`       | ESLint + invisible control-byte scan                                |
+| `npm test`           | Vitest suite                                                        |
+| `npm run format`     | Prettier write                                                      |
+| `npm run export:web` | Checked static export for deploy (see below)                        |
+| `npm run serve:web`  | Serve `apps/web/out` like Cloudflare Pages on http://localhost:3100 |
+
+## Deploy — Cloudflare Pages (free tier)
+
+The web app is a static export in `apps/web/out`: no server to pay for, every request a CDN hit.
+
+| Pages setting                    | Value                                                                              |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| Build command                    | `npm run export:web`                                                               |
+| Build output directory           | `apps/web/out`                                                                     |
+| `NODE_VERSION`                   | `22`                                                                               |
+| `NEXT_PUBLIC_SITE_URL`           | public https origin, no path                                                       |
+| `NEXT_PUBLIC_ANALYTICS_ENDPOINT` | event collector (roadmap F7); or `FLOW_ALLOW_NO_ANALYTICS=1` for a private preview |
+
+`npm run export:web` refuses to build without the site URL or the analytics endpoint, and refuses to publish an export whose share previews (`og:image`, `og:url`, `twitter:image`) point anywhere but the site URL.
+
+Publication and rights expiry are evaluated **at build time**: rebuild whenever the catalog or a rights window changes.
 
 ## Environment
 
@@ -70,7 +88,7 @@ No secrets are required for Prompt A. Do not commit `.env`.
 
 1. Follow `docs/` and `docs/mvp/MVP-V0-SPEC.md`.
 2. Smallest viable change. Justify new dependencies.
-3. No feed/video/auth/coins until their prompts.
+3. Coins, paywalls and unlock mechanics are forbidden forever (`AGENTS.md`).
 4. Never claim done without typecheck + lint + tests.
 
 ## Product docs

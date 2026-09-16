@@ -19,7 +19,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write .",
-    "build:web": "npm run build -w @project-flow/web"
+    "build:web": "npm run build -w @project-flow/web",
+    "export:web": "node scripts/deploy-checks.mjs env && npm run build -w @project-flow/web && node scripts/deploy-checks.mjs export",
+    "serve:web": "node scripts/serve-static.mjs apps/web/out 3100"
   },
   "engines": {
     "node": ">=20"

@@ -8,16 +8,16 @@ measured, it is not part of the standard yet.
 Competitor baseline (verified 2026-09-16, TheWrap): the leading apps give the first 8–10
 episodes free, then paywall with coins or subscriptions of up to $19.99 a week.
 
-| Our rule                                                                        | Status 2026-09-16                                                                |
-| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Every episode free, forever. No coins, unlocks or tasks                         | Holds by design: no payment code exists                                          |
-| Open a link and the episode is already playing. No install, login or onboarding | Holds. Measured: about 2 s to playback on a local production build               |
-| Ads only inside the Ad Charter (section 2)                                      | Enforced in code: 26 tests, each rule proven by a sabotage run. No ads shown yet |
-| A shared link opens the exact episode, with a correct preview card              | **Broken**: preview image points to localhost (measured). Fix in progress        |
-| Contextual ads only, no personal profiling                                      | Holds by design                                                                  |
-| Picture adapts to the network; nothing downloaded beyond current + next episode | **Not yet.** Single-file MP4, and 4 files fetched at open (measured)             |
-| Subtitles in the viewer's language                                              | Partial: English, and Spanish on one episode                                     |
-| Reasons to return tomorrow (follow survives reload, new-episode alerts)         | **Not yet.** Like and follow live in memory only                                 |
+| Our rule                                                                        | Status 2026-09-16                                                                                                     |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Every episode free, forever. No coins, unlocks or tasks                         | Holds by design: no payment code exists                                                                               |
+| Open a link and the episode is already playing. No install, login or onboarding | Holds. Measured: about 2 s to playback on a local production build                                                    |
+| Ads only inside the Ad Charter (section 2)                                      | Enforced in code: 26 tests, each rule proven by a sabotage run. No ads shown yet                                      |
+| A shared link opens the exact episode, with a correct preview card              | Holds: absolute preview URLs; `npm run export:web` refuses an export pointing elsewhere (proven on a localhost build) |
+| Contextual ads only, no personal profiling                                      | Holds by design                                                                                                       |
+| Picture adapts to the network; nothing downloaded beyond current + next episode | **Not yet.** Single-file MP4, and 4 files fetched at open (measured)                                                  |
+| Subtitles in the viewer's language                                              | Partial: English, and Spanish on one episode                                                                          |
+| Reasons to return tomorrow (follow survives reload, new-episode alerts)         | **Not yet.** Like and follow live in memory only                                                                      |
 
 A row turns green only with evidence: a test, a build artifact, or a production metric.
 

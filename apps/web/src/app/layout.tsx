@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { darkColors } from "@project-flow/design-system";
 
+import { resolveSiteUrl } from "@/lib/siteUrl";
+
 import "./globals.css";
 
 /**
@@ -35,9 +37,7 @@ const fontBody = localFont({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
-  ),
+  metadataBase: new URL(resolveSiteUrl(process.env.NEXT_PUBLIC_SITE_URL)),
   title: {
     default: "PROJECT FLOW",
     template: "%s · PROJECT FLOW",
