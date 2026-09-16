@@ -127,5 +127,23 @@ export type {
   AdSessionState,
   SponsorPlacementContext,
 } from "./ads/adCharter";
+export {
+  WATCH_SAMPLE_JITTER_TOLERANCE_MS,
+  computeWatchedMinutes,
+  watchProgressRecordsFromEnvelopes,
+} from "./partners/watchedMinutes";
+export type {
+  EnvelopeConversion,
+  WatchProgressRecord,
+  WatchedMinutesResult,
+  WatchedMinutesRow,
+} from "./partners/watchedMinutes";
+export { buildProducerStatement } from "./partners/producerStatement";
+export type {
+  ProducerStatement,
+  ProducerStatementInput,
+  ProducerStatementIssue,
+  ProducerStatementLine,
+} from "./partners/producerStatement";
 export { logContentEvent } from "./observability/contentLog";
 export type { ContentLogEvent, ContentLogFields } from "./observability/contentLog";

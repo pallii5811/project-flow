@@ -11,7 +11,7 @@ Business shape and rules: `docs/business-model.md`, `docs/standard.md`.
 | F1   | Repository in git                                                                         | DONE   |
 | F2   | Business model + Standard written as law (docs, AGENTS.md, decision log)                  | DONE   |
 | F3   | Ad Charter as pure, tested code (`evaluateAdBreak`)                                       | DONE   |
-| F4   | Watched minutes + producer statements as pure, tested code                                | todo   |
+| F4   | Watched minutes + producer statements as pure, tested code                                | DONE   |
 | F5   | Share previews with absolute URLs + static export for Cloudflare Pages + build-time guard | todo   |
 | F6   | Adaptive video: HLS packaging script + player + current/next-only preload                 | todo   |
 | F7   | Event collector (Workers + D1) — needs the owner's Cloudflare account                     | todo   |
