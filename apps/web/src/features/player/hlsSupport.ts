@@ -37,8 +37,55 @@ export function chooseHlsEngine(env: HlsEnvironment): HlsEngine {
   return "unsupported";
 }
 
+/** Safari, and not one of the browsers that put "Safari" in their user agent. */
+export const SAFARI_USER_AGENT_PATTERN =
+  /^((?!chrome|chromium|android|crios|fxios|edg|opr).)*safari/i;
+
 export function isSafariUserAgent(userAgent: string): boolean {
-  return /^((?!chrome|chromium|android|crios|fxios|edg|opr).)*safari/i.test(userAgent);
+  return SAFARI_USER_AGENT_PATTERN.test(userAgent);
+}
+
+/**
+ * Whether to start downloading hls.js before any player asks for it (speed-4).
+ * Only where hls.js will run: Safari plays HLS natively and must not pay for
+ * an engine it never uses.
+ */
+export function shouldWarmHlsEngine(env: {
+  isSafari: boolean;
+  mediaSourceSupported: boolean;
+}): boolean {
+  return env.mediaSourceSupported && !env.isSafari;
+}
+
+/**
+ * Stands for the hls.js chunk URL in the warmup script. The chunk name is only
+ * known after `next build`; scripts/link-hls-engine.mjs replaces this token in
+ * the exported pages. Left in place (next dev), the script skips the engine.
+ */
+export const HLS_ENGINE_CHUNK_PLACEHOLDER = "__FLOW_HLS_ENGINE_CHUNK__";
+
+/**
+ * Inline script for the static HTML (speed-4). Where hls.js will play the
+ * episode, it starts downloading the hls.js chunk and the episode's playlist
+ * while the page's JavaScript is still downloading, instead of after
+ * hydration. Safari (native HLS) and browsers without Media Source skip it and
+ * fetch nothing extra.
+ */
+export function buildHlsWarmupScript(playlists: string[]): string {
+  // "<" escaped so no URL can close the script element.
+  const json = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
+  return [
+    "(function(){try{",
+    `if(new RegExp(${json(SAFARI_USER_AGENT_PATTERN.source)},"i").test(navigator.userAgent))return;`,
+    "if(!(window.MediaSource||window.ManagedMediaSource))return;",
+    "var add=function(as,href,cors){var l=document.createElement('link');",
+    "l.rel='preload';l.as=as;if(cors)l.crossOrigin='anonymous';l.href=href;document.head.appendChild(l);};",
+    `var engine=${json(HLS_ENGINE_CHUNK_PLACEHOLDER)};`,
+    "if(engine.indexOf('__')!==0)add('script',engine,false);",
+    `var urls=${json(playlists)};`,
+    "for(var i=0;i<urls.length;i++)add('fetch',urls[i],true);",
+    "}catch(e){}})();",
+  ].join("");
 }
 
 export type HlsLoadPlan = {

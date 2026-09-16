@@ -3,24 +3,36 @@
  * Real-browser check of the consumer path on the static export
  * (docs/standard.md §4, "a real browser run of open → play → swipe").
  *
- *   npm run export:web        # or npm run build:web
- *   npm run e2e:web
+ *   npm run build:web        && npm run e2e:web          # normal catalog
+ *   npm run build:web:stress && npm run e2e:web:scale    # 600 extra episodes
+ *
+ * Flags: --scale serves apps/web/out-stress and adds the catalog-scale checks;
+ * --throttle also measures cold opens on a throttled phone (report only).
  *
  * Drives the system Chrome (it decodes H.264; no browser download) headless
- * with a phone profile against apps/web/out, served the way Cloudflare Pages
+ * with a phone profile against the export, served the way Cloudflare Pages
  * serves it. Prints what it measured and exits 1 on any broken promise:
- *   1. the first episode starts by itself;
+ *   1. the first episode starts by itself, within the first-play budget;
  *   2. only current + next are fetched, and the next only its first seconds;
- *   3. a swipe starts the next episode;
- *   4. a shared link starts the exact episode;
- *   5. an unknown episode is a real 404 with the friendly page;
- *   6. no console errors on the way.
+ *   3. at open, few posters are fetched and few slides render media;
+ *   4. a swipe starts the next episode;
+ *   5. a shared link starts the exact episode;
+ *   6. an unknown episode is a real 404 with the friendly page;
+ *   7. the HTML of the home and of an episode page stays small;
+ *   8. no console errors on the way.
+ * With --scale also: a deep link far into the catalog plays, and swiping
+ * through the feed extends it without ever holding the whole catalog.
  */
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+const SCALE = process.argv.includes("--scale");
+const THROTTLE = process.argv.includes("--throttle");
+const EXPORT_DIR = SCALE ? "apps/web/out-stress" : "apps/web/out";
 const PORT = 3217;
 const BASE = `http://localhost:${PORT}`;
 /** Must match NEXT_EPISODE_WARM_SECONDS in apps/web/src/features/player/hlsSupport.ts. */
@@ -28,15 +40,25 @@ const NEXT_EPISODE_WARM_SECONDS = 4;
 const SEGMENT_SECONDS = 2;
 /** Generous for a local headless run; production is judged on the p75 target. */
 const SWIPE_BUDGET_MS = 1_000;
+/** docs/standard.md §3: first play < 1.5 s. Localhost has no latency, so this bounds the code. */
+const FIRST_PLAY_BUDGET_MS = 1_500;
+/** Posters at open: the playing episode, its neighbours, and nothing from the catalog. */
+const OPEN_POSTER_BUDGET = 6;
+/** Slides with poster or player: index-2 .. index+2. */
+const MEDIA_SLIDE_BUDGET = 5;
+/** Server HTML carries only the first-frame slides, whatever the catalog size. */
+const HTML_BUDGET_BYTES = 50_000;
+/** Feed page (about 40) plus extensions; never the whole catalog. */
+const FEED_LIST_BUDGET = 120;
 
 const failures = [];
-const measured = {};
+const measured = { mode: SCALE ? "scale" : "normal" };
 
 function check(condition, message) {
   if (!condition) failures.push(message);
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 
 async function waitForServer() {
   for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -69,30 +91,129 @@ function installPlayingProbe() {
   );
 }
 
-function trackPage(page, label, consoleErrors, mediaRequests) {
+function trackPage(page, label, consoleErrors, mediaRequests, posterRequests = []) {
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(`${label}: ${message.text()}`);
   });
   page.on("pageerror", (error) => consoleErrors.push(`${label}: ${error.message}`));
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.includes("/posters/")) posterRequests.push(url.pathname + url.search);
+  });
   page.on("requestfinished", async (request) => {
     const { pathname } = new URL(request.url());
-    const match = /hls\/episode-(\d+)\/(v\d+)?\/?(?:seg_(\d+)\.m4s)?/.exec(pathname);
+    const match =
+      /hls\/episode-(\d+)\/(?:(v\d+)\/)?(?:seg_(\d+)\.m4s|(master)\.m3u8|index\.m3u8|init_\d+\.mp4)/.exec(
+        pathname,
+      );
     if (!match) return;
     const sizes = await request.sizes().catch(() => null);
     mediaRequests.push({
       episode: Number(match[1]),
       rung: match[2] ?? null,
       segment: match[3] === undefined ? null : Number(match[3]),
+      master: match[4] === "master",
       bytes: sizes ? sizes.responseBodySize : null,
     });
   });
 }
 
-const server = spawn(
-  process.execPath,
-  ["scripts/serve-static.mjs", "apps/web/out", String(PORT)],
-  { cwd: repoRoot, stdio: "ignore" },
-);
+/** Slides in the feed list, and how many of them render a poster or a player. */
+function feedShape() {
+  const feed = document.querySelector('[role="feed"]');
+  const slides = feed ? [...feed.children] : [];
+  return {
+    listed: slides.length,
+    withMedia: slides.filter((slide) => slide.querySelector("img, video")).length,
+    active: document
+      .querySelector('[data-active="true"]')
+      ?.getAttribute("data-content-id") ?? null,
+  };
+}
+
+function swipeAndWaitForPlaying(expectedId) {
+  return new Promise((resolveSwipe) => {
+    const seen = window.__flowPlaying.length;
+    const start = performance.now();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+    const poll = () => {
+      const hit = window.__flowPlaying
+        .slice(seen)
+        .find((entry) => (expectedId ? entry.contentId === expectedId : true));
+      if (hit) resolveSwipe({ ms: Math.round(hit.at - start), contentId: hit.contentId });
+      else if (performance.now() - start > 5_000) resolveSwipe(null);
+      else window.requestAnimationFrame(poll);
+    };
+    poll();
+  });
+}
+
+function fileBytes(relativePath) {
+  try {
+    return statSync(resolve(repoRoot, EXPORT_DIR, relativePath)).size;
+  } catch {
+    return null;
+  }
+}
+
+/** Cold opens on a throttled mid-range phone: report only, never a failure. */
+async function measureThrottled(browser, runs = 3) {
+  const results = [];
+  for (let run = 0; run < runs; run += 1) {
+    const context = await browser.newContext({
+      viewport: { width: 375, height: 812 },
+      deviceScaleFactor: 3,
+      isMobile: true,
+      hasTouch: true,
+      userAgent:
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36",
+    });
+    await context.addInitScript(installPlayingProbe);
+    const page = await context.newPage();
+    let hlsChunkUrl = null;
+    page.on("response", async (response) => {
+      const url = response.url();
+      if (!url.endsWith(".js") || hlsChunkUrl) return;
+      const body = await response.text().catch(() => "");
+      if (body.includes("hlsManifestParsed")) hlsChunkUrl = url;
+    });
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Network.enable");
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: 150,
+      downloadThroughput: (1.6 * 1024 * 1024) / 8,
+      uploadThroughput: (750 * 1024) / 8,
+    });
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+    await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+      timeout: 60_000,
+    });
+    const timing = await page.evaluate((chunkUrl) => {
+      const entries = performance.getEntriesByType("resource");
+      const startOf = (predicate) => {
+        const entry = entries.find((candidate) => predicate(candidate.name));
+        return entry ? Math.round(entry.startTime) : null;
+      };
+      return {
+        firstPlayingMs: Math.round(window.__flowPlaying[0].at),
+        hlsEngineRequestedMs: chunkUrl ? startOf((name) => name === chunkUrl) : null,
+        masterPlaylistRequestedMs: startOf((name) => name.includes("master.m3u8")),
+        firstSegmentRequestedMs: startOf((name) => name.endsWith(".m4s")),
+      };
+    }, hlsChunkUrl);
+    results.push(timing);
+    await context.close();
+  }
+  const sorted = results.map((entry) => entry.firstPlayingMs).sort((a, b) => a - b);
+  return { runs: results, medianFirstPlayingMs: sorted[Math.floor(sorted.length / 2)] };
+}
+
+const server = spawn(process.execPath, ["scripts/serve-static.mjs", EXPORT_DIR, String(PORT)], {
+  cwd: repoRoot,
+  stdio: "ignore",
+});
 
 let browser;
 try {
@@ -109,10 +230,11 @@ try {
   await context.addInitScript(installPlayingProbe);
   const consoleErrors = [];
 
-  // 1–3: cold open, preload budget, swipe.
+  // 1–4: cold open, preload budget, open budget, swipe.
   const feedMedia = [];
+  const feedPosters = [];
   const feed = await context.newPage();
-  trackPage(feed, "feed", consoleErrors, feedMedia);
+  trackPage(feed, "feed", consoleErrors, feedMedia, feedPosters);
   await feed.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
   await feed.waitForFunction(() => window.__flowPlaying.length > 0, null, {
     timeout: 10_000,
@@ -124,13 +246,22 @@ try {
     first.contentId === "item_signal_1",
     `first playing episode is ${first.contentId}`,
   );
+  check(
+    first.at <= FIRST_PLAY_BUDGET_MS,
+    `first play took ${Math.round(first.at)} ms (budget ${FIRST_PLAY_BUDGET_MS} ms)`,
+  );
 
   await sleep(2_500);
   const byEpisode = {};
   for (const request of feedMedia) {
-    const entry = (byEpisode[request.episode] ??= { segments: [], bytes: 0 });
+    const entry = (byEpisode[request.episode] ??= {
+      segments: [],
+      masterRequests: 0,
+      bytes: 0,
+    });
     if (request.segment !== null)
       entry.segments.push(`${request.rung}/${request.segment}`);
+    if (request.master) entry.masterRequests += 1;
     entry.bytes += request.bytes ?? 0;
   }
   measured.mediaAtOpen = byEpisode;
@@ -152,50 +283,162 @@ try {
       .map((request) => `${request.rung}/seg_${request.segment}`)
       .join(", ")}`,
   );
-
-  const swipeMs = await feed.evaluate(
-    () =>
-      new Promise((resolve) => {
-        const seen = window.__flowPlaying.length;
-        const start = performance.now();
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
-        const poll = () => {
-          const hit = window.__flowPlaying
-            .slice(seen)
-            .find((entry) => entry.contentId === "item_signal_2");
-          if (hit) resolve(Math.round(hit.at - start));
-          else if (performance.now() - start > 5_000) resolve(null);
-          else window.requestAnimationFrame(poll);
-        };
-        poll();
-      }),
-  );
-  measured.swipeToNextPlayingMs = swipeMs;
-  check(swipeMs !== null, "swipe did not start the next episode within 5 s");
   check(
-    swipeMs === null || swipeMs <= SWIPE_BUDGET_MS,
-    `swipe took ${swipeMs} ms (budget ${SWIPE_BUDGET_MS} ms)`,
+    (byEpisode[1]?.masterRequests ?? 0) <= 1,
+    `first episode playlist fetched ${byEpisode[1]?.masterRequests} times`,
   );
+
+  const postersAtOpen = [...new Set(feedPosters)];
+  measured.postersRequestedAtOpen = postersAtOpen.length;
+  check(
+    postersAtOpen.length <= OPEN_POSTER_BUDGET,
+    `${postersAtOpen.length} posters requested at open (budget ${OPEN_POSTER_BUDGET})`,
+  );
+  const shapeAtOpen = await feed.evaluate(feedShape);
+  measured.feedAtOpen = shapeAtOpen;
+  check(
+    shapeAtOpen.withMedia <= MEDIA_SLIDE_BUDGET,
+    `${shapeAtOpen.withMedia} slides render media at open (budget ${MEDIA_SLIDE_BUDGET})`,
+  );
+  check(
+    shapeAtOpen.listed <= FEED_LIST_BUDGET,
+    `feed lists ${shapeAtOpen.listed} slides at open (budget ${FEED_LIST_BUDGET})`,
+  );
+
+  // Progress lives outside React state now: the bar must still move.
+  measured.progressBarAtOpen = await feed.evaluate(() =>
+    Number(document.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")),
+  );
+  check(
+    measured.progressBarAtOpen > 0,
+    `progress bar did not move while playing (${measured.progressBarAtOpen})`,
+  );
+
+  const swipe = await feed.evaluate(swipeAndWaitForPlaying, "item_signal_2");
+  measured.swipeToNextPlayingMs = swipe ? swipe.ms : null;
+  check(swipe !== null, "swipe did not start the next episode within 5 s");
+  check(
+    swipe === null || swipe.ms <= SWIPE_BUDGET_MS,
+    `swipe took ${swipe?.ms} ms (budget ${SWIPE_BUDGET_MS} ms)`,
+  );
+
+  // Swipe deep into the feed: the list must extend, media stays bounded.
+  if (SCALE) {
+    for (let step = 0; step < 45; step += 1) {
+      await feed.evaluate(() =>
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" })),
+      );
+      await sleep(60);
+    }
+    await sleep(500);
+    const deepSwipe = await feed.evaluate(swipeAndWaitForPlaying, null);
+    const deepShape = await feed.evaluate(feedShape);
+    measured.afterDeepSwipes = {
+      ...deepShape,
+      swipeToPlayingMs: deepSwipe ? deepSwipe.ms : null,
+    };
+    check(
+      deepShape.listed > 47,
+      `feed did not extend: ${deepShape.listed} slides after 47 swipes`,
+    );
+    check(
+      deepShape.listed <= FEED_LIST_BUDGET,
+      `feed lists ${deepShape.listed} slides after swipes (budget ${FEED_LIST_BUDGET})`,
+    );
+    check(
+      deepShape.withMedia <= MEDIA_SLIDE_BUDGET,
+      `${deepShape.withMedia} slides render media after swipes (budget ${MEDIA_SLIDE_BUDGET})`,
+    );
+    check(
+      deepSwipe !== null && deepSwipe.ms <= SWIPE_BUDGET_MS,
+      `swipe deep in the feed took ${deepSwipe?.ms ?? "more than 5000"} ms (budget ${SWIPE_BUDGET_MS} ms)`,
+    );
+  }
   await feed.close();
 
-  // 4: shared link.
-  const shared = await context.newPage();
-  trackPage(shared, "shared", consoleErrors, []);
-  await shared.goto(`${BASE}/watch/signal-night/episode-3?utm_source=share`, {
-    waitUntil: "domcontentloaded",
-  });
-  await shared.waitForFunction(() => window.__flowPlaying.length > 0, null, {
-    timeout: 10_000,
-  });
-  const sharedFirst = await shared.evaluate(() => window.__flowPlaying[0]);
-  measured.sharedLinkFirstEpisode = sharedFirst.contentId;
-  check(
-    sharedFirst.contentId === "item_signal_3",
-    `shared link started ${sharedFirst.contentId}`,
-  );
-  await shared.close();
+  // 5: shared links.
+  const sharedTargets = [["/watch/signal-night/episode-3", "item_signal_3"]];
+  if (SCALE) sharedTargets.push(["/watch/stress-10/episode-60", "item_stress_10_60"]);
+  measured.sharedLinks = {};
+  for (const [path, expected] of sharedTargets) {
+    const shared = await context.newPage();
+    trackPage(shared, `shared ${path}`, consoleErrors, []);
+    await shared.goto(`${BASE}${path}?utm_source=share`, {
+      waitUntil: "domcontentloaded",
+    });
+    await shared.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+      timeout: 10_000,
+    });
+    const sharedFirst = await shared.evaluate(() => window.__flowPlaying[0]);
+    measured.sharedLinks[path] = {
+      firstEpisode: sharedFirst.contentId,
+      firstPlayingMs: Math.round(sharedFirst.at),
+    };
+    check(
+      sharedFirst.contentId === expected,
+      `shared link ${path} started ${sharedFirst.contentId}`,
+    );
+    await shared.close();
+  }
 
-  // 5: unknown episode.
+  // Auto-continue within the series, from a shared link.
+  const [continueFrom, continueTo] = SCALE
+    ? ["/watch/stress-2/episode-59", "item_stress_2_60"]
+    : ["/watch/signal-night/episode-4", "item_signal_5"];
+  const continuing = await context.newPage();
+  trackPage(continuing, "continue", consoleErrors, []);
+  await continuing.goto(`${BASE}${continueFrom}`, { waitUntil: "domcontentloaded" });
+  const continued = await continuing
+    .waitForFunction(
+      (id) => window.__flowPlaying.some((entry) => entry.contentId === id),
+      continueTo,
+      { timeout: 25_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  measured.autoContinue = { from: continueFrom, to: continueTo, continued };
+  check(continued, `episode at ${continueFrom} did not continue to ${continueTo}`);
+  await continuing.close();
+
+  // Resume: an episode outside the first frame still reopens where it was.
+  const resumeTarget = SCALE
+    ? { contentId: "item_stress_3_10", seriesId: "series_stress_3", episodeId: "ep_stress_3_10" }
+    : { contentId: "item_signal_4", seriesId: "series_signal", episodeId: "ep_signal_4" };
+  const resumeContext = await browser.newContext({
+    viewport: { width: 375, height: 812 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await resumeContext.addInitScript(installPlayingProbe);
+  await resumeContext.addInitScript((snapshot) => {
+    window.localStorage.setItem("project-flow.resume.v1", JSON.stringify(snapshot));
+  }, {
+    ...resumeTarget,
+    positionMs: 5_000,
+    durationMs: 10_000,
+    muted: true,
+    captionsOn: false,
+    updatedAt: Date.now(),
+    completed: false,
+  });
+  const resumed = await resumeContext.newPage();
+  trackPage(resumed, "resume", consoleErrors, []);
+  await resumed.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+  const resumedOk = await resumed
+    .waitForFunction(
+      (id) =>
+        window.__flowPlaying.some((entry) => entry.contentId === id) &&
+        document.querySelector('[aria-label="Continue story"]') !== null,
+      resumeTarget.contentId,
+      { timeout: 10_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  measured.resume = { target: resumeTarget.contentId, playingWithOffer: resumedOk };
+  check(resumedOk, `resume did not reopen ${resumeTarget.contentId} with its offer`);
+  await resumeContext.close();
+
+  // 6: unknown episode.
   const missing = await context.newPage();
   const response = await missing.goto(`${BASE}/watch/signal-night/does-not-exist`);
   measured.unknownEpisodeStatus = response ? response.status() : null;
@@ -207,9 +450,24 @@ try {
   );
   await missing.close();
 
-  // 6: console.
+  // 7: HTML weight.
+  measured.htmlBytes = {
+    "index.html": fileBytes("index.html"),
+    "watch/signal-night/episode-3.html": fileBytes("watch/signal-night/episode-3.html"),
+  };
+  for (const [name, bytes] of Object.entries(measured.htmlBytes)) {
+    check(bytes !== null, `${name} is missing from the export`);
+    check(
+      bytes === null || bytes <= HTML_BUDGET_BYTES,
+      `${name} is ${bytes} bytes (budget ${HTML_BUDGET_BYTES})`,
+    );
+  }
+
+  // 8: console.
   measured.consoleErrors = consoleErrors;
   check(consoleErrors.length === 0, `console errors: ${consoleErrors.join(" | ")}`);
+
+  if (THROTTLE) measured.throttledColdOpen = await measureThrottled(browser);
 } catch (error) {
   failures.push(`run aborted: ${error instanceof Error ? error.message : String(error)}`);
 } finally {
@@ -219,8 +477,8 @@ try {
 
 console.error(JSON.stringify(measured, null, 2));
 if (failures.length > 0) {
-  console.error("e2e-feed: FAILED");
+  console.error(`e2e-feed (${measured.mode}): FAILED`);
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
-console.error("e2e-feed: ok");
+console.error(`e2e-feed (${measured.mode}): ok`);

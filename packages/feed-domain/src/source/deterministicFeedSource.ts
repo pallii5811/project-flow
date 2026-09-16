@@ -30,14 +30,23 @@ export function createDeterministicFeedSource(
     .filter((item) => (publishedOnly ? isPlayableItem(item, now) : true))
     .sort((a, b) => a.order - b.order);
 
+  // Series → episode number → first item in feed order. Built once: looking
+  // the next episode up must not walk the whole catalog at catalog scale.
+  const episodes = new Map<string, Map<number, ContentItem>>();
+  for (const item of byOrder) {
+    let series = episodes.get(item.seriesId);
+    if (!series) {
+      series = new Map();
+      episodes.set(item.seriesId, series);
+    }
+    if (!series.has(item.episodeNumber)) series.set(item.episodeNumber, item);
+  }
+
   return {
     loadCatalog: () => catalog,
     getOrderedItems: () => byOrder,
     getNextEpisode(item: ContentItem): ContentItem | null {
-      const sameSeries = byOrder.filter((candidate) => candidate.seriesId === item.seriesId);
-      const next = sameSeries.find(
-        (candidate) => candidate.episodeNumber === item.episodeNumber + 1,
-      );
+      const next = episodes.get(item.seriesId)?.get(item.episodeNumber + 1);
       if (!next) return null;
       if (publishedOnly && !isPlayableItem(next, now)) return null;
       return next;

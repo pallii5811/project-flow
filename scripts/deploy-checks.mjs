@@ -38,6 +38,11 @@ function httpsOrigin(name) {
 }
 
 function checkEnv() {
+  if (process.env.FLOW_STRESS_EPISODES?.trim()) {
+    failures.push(
+      "FLOW_STRESS_EPISODES is set: that is a scale-test catalog, never a publishable one",
+    );
+  }
   const site = httpsOrigin("NEXT_PUBLIC_SITE_URL");
   if (site && (site.pathname !== "/" || site.search || site.hash)) {
     failures.push(`NEXT_PUBLIC_SITE_URL must be an origin without path: "${site.href}"`);
@@ -107,6 +112,22 @@ function checkExport() {
     }
     if (watchPages.includes(file) && metaContent(html, "og:image").length === 0) {
       failures.push(`${name} has no og:image: shared links would show no picture`);
+    }
+  }
+
+  // The feed fetches its catalog after first play: without it, nobody can
+  // swipe past the second episode.
+  let feedCatalog = null;
+  try {
+    feedCatalog = JSON.parse(readFileSync(join(exportDir, "catalog/feed.json"), "utf8"));
+  } catch {
+    failures.push("export has no readable catalog/feed.json");
+  }
+  if (feedCatalog) {
+    if (!Array.isArray(feedCatalog.items) || feedCatalog.items.length === 0) {
+      failures.push("catalog/feed.json lists no episodes");
+    } else if (feedCatalog.items.some((item) => String(item.id).startsWith("item_stress_"))) {
+      failures.push("catalog/feed.json contains the stress catalog");
     }
   }
 

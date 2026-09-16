@@ -34,8 +34,12 @@ export function applyExploration(
     .slice(0, 2)
     .map(([g]) => g);
 
+  // A set, not ranked.some per catalog item: that was candidates × catalog.
+  const continuationIds = new Set(
+    ranked.filter((c) => c.source === "continuation").map((c) => c.contentId),
+  );
   const outside = catalog.filter((item) => {
-    if (ranked.some((c) => c.contentId === item.id && c.source === "continuation")) {
+    if (continuationIds.has(item.id)) {
       return false;
     }
     if (topGenres.length === 0) return true;

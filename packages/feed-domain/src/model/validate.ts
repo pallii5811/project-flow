@@ -432,14 +432,20 @@ export function validateCatalog(raw: unknown): CatalogValidationResult {
     episodeSlugKeys.add(slugKey);
   }
 
-  // Next-episode consistency for published items
+  // Next-episode consistency for published items. Indexed once: a lookup per
+  // item over the whole list was quadratic (316 ms for 6,000 episodes).
+  const firstByEpisode = new Map<string, Map<number, ContentItem>>();
+  for (const item of items) {
+    let series = firstByEpisode.get(item.seriesId);
+    if (!series) {
+      series = new Map();
+      firstByEpisode.set(item.seriesId, series);
+    }
+    if (!series.has(item.episodeNumber)) series.set(item.episodeNumber, item);
+  }
   for (const item of items) {
     if (item.status !== "published") continue;
-    const next = items.find(
-      (candidate) =>
-        candidate.seriesId === item.seriesId &&
-        candidate.episodeNumber === item.episodeNumber + 1,
-    );
+    const next = firstByEpisode.get(item.seriesId)?.get(item.episodeNumber + 1);
     if (next && next.status !== "published" && next.status !== "draft") {
       // draft next is ok (end of published run); unpublished/expired mid-chain is a gap warning
       issues.push(

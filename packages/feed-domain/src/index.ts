@@ -33,6 +33,13 @@ export {
   RAW_LAUNCH_SEED,
   getLaunchFeedCatalog,
 } from "./data/catalog";
+export {
+  STRESS_EPISODES_MAX,
+  STRESS_EPISODES_PER_SERIES,
+  STRESS_ORDER_OFFSET,
+  parseStressEpisodeCount,
+  withStressEpisodes,
+} from "./data/stressCatalog";
 
 export type {
   FeedSource,
@@ -42,6 +49,31 @@ export { createDeterministicFeedSource } from "./source/deterministicFeedSource"
 
 export type { NextEpisodeResolution } from "./continuation/resolveNextInSeries";
 export { resolveNextInSeries } from "./continuation/resolveNextInSeries";
+
+export {
+  FEED_CATALOG_PAYLOAD_VERSION,
+  firstFramePayload,
+  fromFeedCatalogPayload,
+  toFeedCatalogPayload,
+} from "./catalog/feedCatalogPayload";
+export type {
+  FeedCatalogPayload,
+  FeedItemCopy,
+  FeedItemPayload,
+} from "./catalog/feedCatalogPayload";
+
+export {
+  FEED_EXTEND_WITHIN,
+  FEED_PAGE_SIZE,
+  FEED_RENDER_RADIUS,
+  applyRecommendedPage,
+  extendFeedPage,
+  needsExtension,
+  pageStartingAt,
+  placeNextInSeries,
+  shouldRenderSlide,
+} from "./state/feedPage";
+export type { PlacedNextEpisode } from "./state/feedPage";
 
 export type { FeedWindow } from "./state/feedLogic";
 export { getFeedWindow, resolveContinuation, getPrefetchIds } from "./state/feedLogic";
@@ -70,6 +102,7 @@ export type { RecommendationService } from "./recommendation/service/createRecom
 export {
   createRecommendationService,
   createTestRecommendationService,
+  preferLanguage,
 } from "./recommendation/service/createRecommendationService";
 export { materializeFeedItems } from "./recommendation/service/materializeFeedItems";
 export {

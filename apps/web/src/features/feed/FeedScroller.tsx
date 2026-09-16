@@ -1,6 +1,6 @@
 "use client";
 
-import type { ContentItem } from "@project-flow/feed-domain";
+import { shouldRenderSlide, type ContentItem } from "@project-flow/feed-domain";
 import {
   useCallback,
   useEffect,
@@ -9,7 +9,8 @@ import {
   type RefObject,
 } from "react";
 
-import { FeedItemView } from "./FeedItemView";
+import { FeedItemView, FeedSlidePlaceholder, type FeedItemHandlers } from "./FeedItemView";
+import type { ProgressStore } from "./progressStore";
 import styles from "./feed.module.css";
 
 type FeedScrollerProps = {
@@ -20,38 +21,13 @@ type FeedScrollerProps = {
   captionsOn: boolean;
   likedIds: Set<string>;
   followingIds: Set<string>;
-  progressById: Record<string, number>;
   seekToMs: number | null;
   showPlayGate: boolean;
   prefetchIds: Set<string>;
   locale?: string | null;
-  onToggleMute: () => void;
-  onUnmute: () => void;
-  onToggleCaptions: () => void;
-  onTogglePlayPause: () => void;
-  onPlayGate: () => void;
-  onLike: (item: ContentItem) => void;
-  onFollow: (item: ContentItem) => void;
-  onShare: (item: ContentItem) => void;
-  onTune: () => void;
-  onCanPlay: (item: ContentItem) => void;
-  onLoadStart: (item: ContentItem) => void;
-  onPosterVisible: (item: ContentItem) => void;
-  onMetadataReady: (item: ContentItem) => void;
-  onTimeUpdate: (
-    item: ContentItem,
-    positionMs: number,
-    durationMs: number,
-  ) => void;
-  onEnded: (item: ContentItem) => void;
-  onError: (item: ContentItem, code: string, reason: string) => void;
-  onPlay: (item: ContentItem) => void;
-  onPause: (item: ContentItem) => void;
-  onPlayAttempt: (item: ContentItem) => void;
-  onFirstFrameProxy: (item: ContentItem) => void;
-  onAutoplayBlocked: () => void;
-  onBufferingStart: (item: ContentItem) => void;
-  onBufferingEnd: (item: ContentItem) => void;
+  progressStore: ProgressStore;
+  /** Stable identity (createStableHandlers): memoized slides depend on it. */
+  handlers: FeedItemHandlers;
   scrollerRef?: RefObject<HTMLDivElement | null>;
 };
 
@@ -63,34 +39,12 @@ export function FeedScroller({
   captionsOn,
   likedIds,
   followingIds,
-  progressById,
   seekToMs,
   showPlayGate,
   prefetchIds,
   locale,
-  onToggleMute,
-  onUnmute,
-  onToggleCaptions,
-  onTogglePlayPause,
-  onPlayGate,
-  onLike,
-  onFollow,
-  onShare,
-  onTune,
-  onCanPlay,
-  onLoadStart,
-  onPosterVisible,
-  onMetadataReady,
-  onTimeUpdate,
-  onEnded,
-  onError,
-  onPlay,
-  onPause,
-  onPlayAttempt,
-  onFirstFrameProxy,
-  onAutoplayBlocked,
-  onBufferingStart,
-  onBufferingEnd,
+  progressStore,
+  handlers,
   scrollerRef,
 }: FeedScrollerProps): ReactElement {
   const localRef = useRef<HTMLDivElement | null>(null);
@@ -148,29 +102,27 @@ export function FeedScroller({
         if (index > 0) onIndexChange(index - 1);
       } else if (event.key === " " || event.code === "Space") {
         event.preventDefault();
-        onTogglePlayPause();
+        handlers.onTogglePlayPause();
       } else if (event.key === "m" || event.key === "M") {
         event.preventDefault();
-        onToggleMute();
+        handlers.onToggleMute();
       } else if (event.key === "c" || event.key === "C") {
-        onToggleCaptions();
+        handlers.onToggleCaptions();
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    index,
-    items.length,
-    onIndexChange,
-    onToggleCaptions,
-    onToggleMute,
-    onTogglePlayPause,
-  ]);
+  }, [handlers, index, items.length, onIndexChange]);
 
   return (
     <div className={styles.scroller} ref={setRef} tabIndex={0} role="feed">
       {items.map((item, itemIndex) => {
+        // Far slides are empty boxes: the list can hold a whole page while
+        // only the slides around the playing one download anything.
+        if (!shouldRenderSlide(itemIndex, index)) {
+          return <FeedSlidePlaceholder key={item.id} contentId={item.id} />;
+        }
         const active = itemIndex === index;
         const inWindow = prefetchIds.has(item.id);
         // Next episode: full preload for zero-gap swipe; neighbors: metadata only.
@@ -190,35 +142,11 @@ export function FeedScroller({
             captionsOn={captionsOn}
             liked={likedIds.has(item.id)}
             following={followingIds.has(item.seriesId)}
-            progress={progressById[item.id] ?? 0}
             seekToMs={active ? seekToMs : null}
             showPlayGate={showPlayGate}
             locale={locale}
-            onPlayGate={onPlayGate}
-            onLike={() => onLike(item)}
-            onFollow={() => onFollow(item)}
-            onShare={() => onShare(item)}
-            onMute={onToggleMute}
-            onUnmute={onUnmute}
-            onCaptions={onToggleCaptions}
-            onTune={onTune}
-            onTogglePlayPause={onTogglePlayPause}
-            onCanPlay={() => onCanPlay(item)}
-            onLoadStart={() => onLoadStart(item)}
-            onPosterVisible={() => onPosterVisible(item)}
-            onMetadataReady={() => onMetadataReady(item)}
-            onTimeUpdate={(positionMs, durationMs) =>
-              onTimeUpdate(item, positionMs, durationMs)
-            }
-            onEnded={() => onEnded(item)}
-            onError={(code, reason) => onError(item, code, reason)}
-            onPlay={() => onPlay(item)}
-            onPause={() => onPause(item)}
-            onPlayAttempt={() => onPlayAttempt(item)}
-            onFirstFrameProxy={() => onFirstFrameProxy(item)}
-            onAutoplayBlocked={onAutoplayBlocked}
-            onBufferingStart={() => onBufferingStart(item)}
-            onBufferingEnd={() => onBufferingEnd(item)}
+            progressStore={progressStore}
+            handlers={handlers}
           />
         );
       })}

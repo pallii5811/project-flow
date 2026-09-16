@@ -5,10 +5,13 @@ import {
   ACTIVE_MAX_BUFFER_SECONDS,
   DEFAULT_START_ESTIMATE_BPS,
   NEXT_EPISODE_WARM_SECONDS,
+  HLS_ENGINE_CHUNK_PLACEHOLDER,
+  buildHlsWarmupScript,
   chooseHlsEngine,
   isHlsSource,
   isSafariUserAgent,
   planHlsLoad,
+  shouldWarmHlsEngine,
   startQuality,
 } from "./hlsSupport";
 
@@ -78,6 +81,81 @@ describe("isSafariUserAgent", () => {
     expect(isSafariUserAgent(iphoneSafari)).toBe(true);
     expect(isSafariUserAgent(androidChrome)).toBe(false);
     expect(isSafariUserAgent(iphoneChrome)).toBe(false);
+  });
+});
+
+const IPHONE_SAFARI =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
+const ANDROID_CHROME =
+  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
+
+describe("shouldWarmHlsEngine — early hls.js download, never for Safari", () => {
+  it("warms only where hls.js will play", () => {
+    expect(shouldWarmHlsEngine({ isSafari: false, mediaSourceSupported: true })).toBe(true);
+    expect(shouldWarmHlsEngine({ isSafari: true, mediaSourceSupported: true })).toBe(false);
+    expect(shouldWarmHlsEngine({ isSafari: false, mediaSourceSupported: false })).toBe(
+      false,
+    );
+  });
+});
+
+describe("buildHlsWarmupScript — engine and playlist requested before hydration", () => {
+  type FakeLink = Record<string, string>;
+  const ENGINE = "/_next/static/chunks/dd0d9434.816eaef6db7f4c5c.js";
+
+  /** Runs the script as the exported page would, after the post-build link step. */
+  function run(
+    userAgent: string,
+    withMediaSource: boolean,
+    urls: string[],
+    linked = true,
+  ): FakeLink[] {
+    const appended: FakeLink[] = [];
+    const fakeWindow: Record<string, unknown> = withMediaSource ? { MediaSource: {} } : {};
+    const fakeDocument = {
+      createElement: () => ({}) as FakeLink,
+      head: { appendChild: (link: FakeLink) => appended.push(link) },
+    };
+    let script = buildHlsWarmupScript(urls);
+    if (linked) script = script.replace(HLS_ENGINE_CHUNK_PLACEHOLDER, ENGINE);
+    new Function("window", "navigator", "document", script)(
+      fakeWindow,
+      { userAgent },
+      fakeDocument,
+    );
+    return appended;
+  }
+
+  it("preloads the engine chunk and the playlist as a CORS fetch hls.js reuses", () => {
+    expect(run(ANDROID_CHROME, true, ["/hls/episode-1/master.m3u8"])).toEqual([
+      { rel: "preload", as: "script", href: ENGINE },
+      {
+        rel: "preload",
+        as: "fetch",
+        crossOrigin: "anonymous",
+        href: "/hls/episode-1/master.m3u8",
+      },
+    ]);
+  });
+
+  it("skips the engine when the build step did not link it (next dev)", () => {
+    expect(run(ANDROID_CHROME, true, ["/a.m3u8"], false).map((link) => link.as)).toEqual([
+      "fetch",
+    ]);
+  });
+
+  it("costs Safari nothing, and browsers without Media Source nothing", () => {
+    expect(run(IPHONE_SAFARI, true, ["/a.m3u8"])).toEqual([]);
+    expect(run(ANDROID_CHROME, false, ["/a.m3u8"])).toEqual([]);
+  });
+
+  it("contains the placeholder exactly once, and no URL can close the script", () => {
+    const script = buildHlsWarmupScript(["/x</script><script>alert(1)//.m3u8"]);
+    expect(script.split(HLS_ENGINE_CHUNK_PLACEHOLDER)).toHaveLength(2);
+    expect(script).not.toContain("</script>");
+    expect(run(ANDROID_CHROME, true, ["/x</script>.m3u8"])[1]?.href).toBe(
+      "/x</script>.m3u8",
+    );
   });
 });
 

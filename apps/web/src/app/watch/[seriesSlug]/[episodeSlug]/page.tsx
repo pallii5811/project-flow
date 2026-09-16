@@ -1,15 +1,15 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { preload } from "react-dom";
 
 import {
   findBySlugs,
-  getLaunchFeedCatalog,
+  firstFramePayload,
   resolveDisplayCopy,
   watchPath,
 } from "@project-flow/feed-domain";
 
-import { FeedApp } from "@/features/feed/FeedApp";
+import { FeedDocument } from "@/features/feed/FeedDocument";
+import { getWebFeedCatalog } from "@/lib/feedCatalog";
 
 type WatchParams = {
   seriesSlug: string;
@@ -28,17 +28,16 @@ type WatchPageProps = {
 export const dynamicParams = false;
 
 export function generateStaticParams(): WatchParams[] {
-  const catalog = getLaunchFeedCatalog();
+  const catalog = getWebFeedCatalog();
+  const slugBySeries = new Map(catalog.series.map((entry) => [entry.id, entry.seriesSlug]));
   return catalog.items.flatMap((item) => {
-    const series = catalog.series.find((entry) => entry.id === item.seriesId);
-    return series
-      ? [{ seriesSlug: series.seriesSlug, episodeSlug: item.episodeSlug }]
-      : [];
+    const seriesSlug = slugBySeries.get(item.seriesId);
+    return seriesSlug ? [{ seriesSlug, episodeSlug: item.episodeSlug }] : [];
   });
 }
 
 function findPublished({ seriesSlug, episodeSlug }: WatchParams) {
-  return findBySlugs(getLaunchFeedCatalog(), seriesSlug, episodeSlug, {
+  return findBySlugs(getWebFeedCatalog(), seriesSlug, episodeSlug, {
     publishedOnly: true,
   });
 }
@@ -69,7 +68,16 @@ export default async function WatchPage({ params }: WatchPageProps) {
   const resolved = await params;
   const item = findPublished(resolved);
   if (!item) notFound();
-  preload(item.thumbnailUrl, { as: "image", fetchPriority: "high" });
+  const initial = firstFramePayload(getWebFeedCatalog(), item.id);
+  // Published at build time but not playable (for example no video): the
+  // feed has nothing to open, which is the same as an unknown episode.
+  if (initial.items.length === 0) notFound();
 
-  return <FeedApp initialContentId={item.id} deepLinkRoute={watchPath(resolved)} />;
+  return (
+    <FeedDocument
+      initial={initial}
+      initialContentId={item.id}
+      deepLinkRoute={watchPath(resolved)}
+    />
+  );
 }

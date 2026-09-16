@@ -12,6 +12,7 @@ export default tseslint.config(
       "apps/mobile/metro.config.js",
       "apps/web/.next/**",
       "apps/web/out/**",
+      "apps/web/out-stress/**",
       "apps/web/next-env.d.ts",
     ],
   },

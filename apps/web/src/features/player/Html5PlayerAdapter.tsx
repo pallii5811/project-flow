@@ -7,6 +7,7 @@ import {
   isHlsSource,
   isSafariUserAgent,
   planHlsLoad,
+  shouldWarmHlsEngine,
   startQuality,
 } from "./hlsSupport";
 import type { PlayerAdapterEvents, VideoSource } from "./types";
@@ -24,11 +25,30 @@ export type Html5PlayerAdapterProps = {
 
 type HlsModule = typeof import("hls.js");
 
-/** One shared download of hls.js, started by the first adaptive source. */
+/** One shared download of hls.js; a failed download may be retried. */
 let hlsModulePromise: Promise<HlsModule> | null = null;
 function loadHls(): Promise<HlsModule> {
-  hlsModulePromise ??= import("hls.js/light");
+  hlsModulePromise ??= import("hls.js/light").catch((error: unknown) => {
+    hlsModulePromise = null;
+    throw error;
+  });
   return hlsModulePromise;
+}
+
+// Start the hls.js download as soon as this module runs, in parallel with
+// hydration, instead of after it inside the player's effect (speed-4). Only
+// where hls.js will play: Safari keeps its native engine and downloads nothing.
+if (
+  typeof window !== "undefined" &&
+  shouldWarmHlsEngine({
+    isSafari: isSafariUserAgent(navigator.userAgent),
+    mediaSourceSupported:
+      "MediaSource" in window || "ManagedMediaSource" in window,
+  })
+) {
+  loadHls().catch(() => {
+    // The player reports it when it actually needs the engine.
+  });
 }
 
 type NetworkInformationLike = { downlink?: number; saveData?: boolean };

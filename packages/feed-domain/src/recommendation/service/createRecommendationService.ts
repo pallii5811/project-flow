@@ -193,15 +193,7 @@ export function createRecommendationService(
           seed: context.seed,
         });
 
-        // Language soft filter: prefer preferred language when alternatives exist
-        const preferred = ranked.filter((c) => {
-          const item = catalogById.get(c.contentId);
-          return item?.language === context.language;
-        });
-        if (preferred.length >= Math.min(3, ranked.length)) {
-          const rest = ranked.filter((c) => !preferred.includes(c));
-          ranked = [...preferred, ...rest];
-        }
+        ranked = preferLanguage(ranked, catalogById, context.language);
 
         // Ensure continuation stays first if present
         ranked = preferContinuationFirst(ranked, continuationItemId);
@@ -255,6 +247,30 @@ export function createRecommendationService(
       }
     },
   };
+}
+
+/**
+ * Language soft filter: candidates in the preferred language first, when there
+ * are enough of them. One pass, stable within each group. (It used
+ * `rest = ranked.filter(c => !preferred.includes(c))`, quadratic in the
+ * number of candidates.)
+ */
+export function preferLanguage(
+  ranked: RecommendationCandidate[],
+  catalogById: Map<string, ContentItem>,
+  language: string,
+): RecommendationCandidate[] {
+  const preferred: RecommendationCandidate[] = [];
+  const rest: RecommendationCandidate[] = [];
+  for (const candidate of ranked) {
+    if (catalogById.get(candidate.contentId)?.language === language) {
+      preferred.push(candidate);
+    } else {
+      rest.push(candidate);
+    }
+  }
+  if (preferred.length < Math.min(3, ranked.length)) return ranked;
+  return [...preferred, ...rest];
 }
 
 function preferContinuationFirst(

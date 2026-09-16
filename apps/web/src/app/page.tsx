@@ -1,12 +1,11 @@
-import { getLaunchFeedCatalog } from "@project-flow/feed-domain";
-import { preload } from "react-dom";
+import { firstFramePayload } from "@project-flow/feed-domain";
 
-import { FeedApp } from "@/features/feed/FeedApp";
+import { FeedDocument } from "@/features/feed/FeedDocument";
+import { getWebFeedCatalog } from "@/lib/feedCatalog";
 
 export default function HomePage() {
-  // Warm the poster of the episode that opens first — taken from the catalog,
-  // never hardcoded, so it follows whatever series leads the feed.
-  const first = getLaunchFeedCatalog().items[0];
-  if (first) preload(first.thumbnailUrl, { as: "image", fetchPriority: "high" });
-  return <FeedApp />;
+  // The episode that opens first comes from the catalog, never hardcoded, so
+  // it follows whatever series leads the feed. Only it and the next one are
+  // in the page; the rest of the catalog is fetched after first play.
+  return <FeedDocument initial={firstFramePayload(getWebFeedCatalog())} />;
 }
