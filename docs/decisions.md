@@ -4,6 +4,33 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-17 — Accessibility and polish: keys that respect controls, a real Tune dialog, a player that survives landscape
+
+**Decision:** The feed's global keys never take a key that belongs to someone else: nothing while a dialog is open or inside one, nothing in a text field, nothing with Ctrl, Alt or Meta, and Space on a focused button or link presses that control instead of pausing. The arrow keys still move between episodes from a rail button. The Tune sheet is a modal dialog: focus moves to its first chip, Tab and Shift+Tab wrap inside it, Escape closes it wherever focus is, focus returns to Tune, a visible Close button sits next to its title (`#b3b0a8`, 8.4:1), and the feed behind it is `inert`. A chip says what it did in a notice ("Darker stories are up next", or "Nothing new for that yet" when the catalog had no candidate). Decisions pure in `apps/web/src/features/feed/a11y.ts`.
+
+Other decisions:
+
+- Screen readers: each slide is named "Series, Episode N of M" with `aria-posinset` (`aria-setsize` −1: the feed grows); one polite live region announces an episode change the viewer made, never the episode the page opened on. When the rail button that had focus leaves with its slide, focus moves to the new slide.
+- Rail toggles keep one name and say their state with `aria-pressed` ("Mute", "Like", "Follow series", "Captions"); state also changes the glyph (filled heart with a short pop, person with a check, filled captions box), never only the colour. Tune uses a sliders glyph.
+- Over a white frame the rail keeps at least 3:1 per icon: a feathered shade behind the rail only (at most 56% black at the edge, fading to nothing 190 px in) and a tight dark edge on each icon. The picture elsewhere is not darkened.
+- A phone in landscape (height ≤ 480 px, any width) gets the uncropped 9:16 frame at full height; the padded desktop frame needs at least 481 px of height. Below 240 px of stage width the title, hook and captions shrink.
+- Safe-area insets are no longer padded on the body: the picture runs full bleed and each piece of chrome adds its inset once.
+- Contrast: the episode position at 90% opacity (4.5:1 over a white frame where the scrim sits under it), the playback error on a 62% shade, neighbouring slides no longer dimmed to 55%. `a11y.test.ts` reads these values from the shipped CSS.
+- Any unknown URL answers 404 with the product's page: "This link has moved or expired." and one card that plays the story the feed opens on.
+
+**Why:** Found on e6ccd17 before the change, from the code and phone screenshots of that build: Space on a focused Like paused the episode; with Tune open the arrow keys changed episode behind it and Escape did nothing unless focus was inside the sheet, where nothing put it; the sheet title was `#6f6d67` (3.6:1); a 740×360 phone got a full-width stage showing a slice of the vertical video; over a bright frame like and follow measured 1.1–1.2:1 against the picture (e2e sabotage run with the shade removed); "Unmute, selected"; the 404 page said "This episode is unavailable." for every URL.
+
+**Consequences:**
+
+- e2e checks 29–35 and an extended 6. Each new browser check was proven by a sabotage run: Space always toggling play, the announcement emptied, Tab and Escape handling renamed, the landscape rule disabled and the rail shade removed all turned `npm run e2e:web` red.
+- The mute pulse the audit blamed for the lost press feedback (UX-11) was already gone in 3a; check 35 now pins the press scale.
+- First-load JavaScript 134 → 136 kB.
+- Not done: haptics on like (no product need proven), a one-time label on Tune (AGENTS.md forbids tutorial overlays). VoiceOver, TalkBack and real notched phones are not tested: the live region and the insets are proven in headless Chrome only.
+
+**Revisit:** When the app runs with `viewport-fit=cover` or as an installed app (insets become non-zero); when a screen-reader user tests the feed on a real phone.
+
+---
+
 ## 2026-09-17 — The first seconds: captions drawn by the app, one sound cue, a series end that hands off
 
 **Decision:** The browser no longer draws captions. Every text track stays `hidden` and the app renders the active cue as plain text in the overlay column, right above the episode position and the title, on a per-line backdrop (`#faf8f4` on `rgba(8, 8, 10, 0.72)`, 18 px). Captions follow the sound until the viewer chooses: on while muted, off with sound. A tap on the captions button is an explicit choice that wins from then on and is remembered on the device (`project-flow.captions.v1`); a resume point saved with captions on migrates as "on". While the Continue strip covers the title block, the title hides and the captions move above the strip.

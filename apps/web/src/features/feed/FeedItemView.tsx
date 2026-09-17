@@ -18,7 +18,8 @@ import { ContentOverlay } from "./ContentOverlay";
 import { PlayGate } from "./PlayGate";
 import type { FailureHold } from "./feedLogic";
 import type { ProgressStore } from "./progressStore";
-import { activeCueText } from "./storyThread";
+import { episodeAnnouncement } from "./a11y";
+import { activeCueText, episodePosition } from "./storyThread";
 import styles from "./feed.module.css";
 
 const videoProvider = createStaticVideoProvider();
@@ -65,6 +66,8 @@ export type FeedItemHandlers = {
 
 type FeedItemViewProps = {
   item: ContentItem;
+  /** 1-based place in the feed list, for aria-posinset. */
+  position: number;
   active: boolean;
   preload: "none" | "metadata" | "auto";
   muted: boolean;
@@ -87,6 +90,7 @@ type FeedItemViewProps = {
 
 function FeedItemViewImpl({
   item,
+  position,
   active,
   preload,
   muted,
@@ -227,6 +231,14 @@ function FeedItemViewImpl({
       className={`${styles.slide}${active ? ` ${styles.slideActive}` : ""}`}
       data-content-id={item.id}
       data-active={active ? "true" : undefined}
+      // Named for screen readers; the feed grows, so its size is unknown (A11Y-07).
+      aria-label={episodeAnnouncement(
+        item.seriesTitle,
+        episodePosition(item.episodeNumber, episodeCount).label,
+      )}
+      aria-posinset={position}
+      aria-setsize={-1}
+      tabIndex={-1}
     >
       <div className={styles.media}>
         <img

@@ -71,7 +71,9 @@ export function ContentOverlay({
       <div className={styles.scrimTop} aria-hidden="true" />
       <div className={styles.scrimBottom} aria-hidden="true" />
       <div
-        className={`${styles.overlay}${active ? "" : ` ${styles.overlayInactive}`}${covered ? ` ${styles.overlayCovered}` : ""}`}
+        // Neighbours keep full contrast: they are read mid-swipe, and a dimmed
+        // overlay replayed its entrance when it became active (A11Y-06).
+        className={`${styles.overlay}${covered ? ` ${styles.overlayCovered}` : ""}`}
       >
         {/*
           Captions sit in the same column, right above the title block: over
@@ -95,7 +97,9 @@ export function ContentOverlay({
         <h2 className={styles.seriesTitle}>{seriesTitle}</h2>
         <p className={styles.hook}>{hook}</p>
       </div>
-      {active ? <ProgressEdge contentId={contentId} progressStore={progressStore} /> : null}
+      {active ? (
+        <ProgressEdge contentId={contentId} progressStore={progressStore} />
+      ) : null}
     </>
   );
 }

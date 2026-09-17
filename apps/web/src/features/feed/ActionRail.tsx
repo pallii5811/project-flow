@@ -42,6 +42,11 @@ function Icon({
   );
 }
 
+/**
+ * Each toggle keeps one name and says its state with aria-pressed, so a screen
+ * reader never hears "Unmute, selected" (A11Y-09). Every state also changes the
+ * glyph, never only the colour (UX-08).
+ */
 export function ActionRail({
   liked,
   following,
@@ -56,12 +61,13 @@ export function ActionRail({
   onTune,
 }: ActionRailProps): ReactElement {
   return (
-    <div className={styles.rail} role="toolbar" aria-label="Clip actions">
+    <div className={styles.rail} role="toolbar" aria-label="Episode actions">
       <button
         type="button"
         className={styles.railButton}
-        aria-label={liked ? "Unlike" : "Like"}
+        aria-label="Like"
         aria-pressed={liked}
+        data-action="like"
         onClick={onLike}
       >
         <Icon filled={liked}>
@@ -71,20 +77,26 @@ export function ActionRail({
       <button
         type="button"
         className={styles.railButton}
-        aria-label={following ? "Unfollow series" : "Follow series"}
+        aria-label="Follow series"
         aria-pressed={following}
+        data-action="follow"
         onClick={onFollow}
       >
         <Icon>
           <path d="M15.5 21v-1.75a3.5 3.5 0 0 0-3.5-3.5H6.5a3.5 3.5 0 0 0-3.5 3.5V21" />
           <circle cx="9.25" cy="7.25" r="3.25" />
-          <path d="M18.5 8.5v5M21 11h-5" />
+          {following ? (
+            <path d="M15.75 10.75l2 2 3.5-4" />
+          ) : (
+            <path d="M18.5 8.5v5M21 11h-5" />
+          )}
         </Icon>
       </button>
       <button
         type="button"
         className={styles.railButton}
         aria-label="Share"
+        data-action="share"
         onClick={onShare}
       >
         <Icon>
@@ -96,9 +108,10 @@ export function ActionRail({
       </button>
       <button
         type="button"
-        className={`${styles.railButton} ${styles.railButtonMute}`}
-        aria-label={muted ? "Unmute" : "Mute"}
+        className={styles.railButton}
+        aria-label="Mute"
         aria-pressed={muted}
+        data-action="mute"
         onClick={onMute}
       >
         <Icon>
@@ -119,25 +132,39 @@ export function ActionRail({
         <button
           type="button"
           className={styles.railButton}
-          aria-label={captionsOn ? "Hide captions" : "Show captions"}
+          aria-label="Captions"
           aria-pressed={captionsOn}
+          data-action="captions"
           onClick={onCaptions}
         >
           <Icon>
-            <rect x="2.5" y="5.5" width="19" height="13" rx="2" />
-            <path d="M7 12h3.2M13.8 12H17" />
+            {captionsOn ? (
+              <>
+                <rect x="2.5" y="5.5" width="19" height="13" rx="2" fill="currentColor" />
+                <path d="M7 12h3.2M13.8 12H17" className={styles.railIconCutout} />
+              </>
+            ) : (
+              <>
+                <rect x="2.5" y="5.5" width="19" height="13" rx="2" />
+                <path d="M7 12h3.2M13.8 12H17" />
+              </>
+            )}
           </Icon>
         </button>
       ) : null}
       <button
         type="button"
         className={styles.railButton}
-        aria-label="Tune what comes next"
+        aria-label="Tune what plays next"
+        aria-haspopup="dialog"
+        data-action="tune"
         onClick={onTune}
       >
+        {/* Sliders: something to adjust, not a display setting (UX-08). */}
         <Icon>
-          <circle cx="12" cy="12" r="2.25" />
-          <path d="M12 3.5v2.2M12 18.3v2.2M4.7 4.7l1.6 1.6M17.7 17.7l1.6 1.6M3.5 12h2.2M18.3 12h2.2M4.7 19.3l1.6-1.6M17.7 6.3l1.6-1.6" />
+          <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+          <circle cx="15" cy="7" r="2" />
+          <circle cx="9" cy="17" r="2" />
         </Icon>
       </button>
     </div>

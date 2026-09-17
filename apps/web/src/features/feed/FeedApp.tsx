@@ -61,6 +61,7 @@ import {
 import { LaunchDiagPanel } from "@/features/diagnostics/LaunchDiagPanel";
 import { patchLaunchDiagnostics } from "@/features/diagnostics/launchDiagnostics";
 
+import { episodeAnnouncement, intentConfirmation, shouldAnnounceEpisode } from "./a11y";
 import { ContinueStrip, UpNextLabel } from "./ContinueStrip";
 import type { FeedItemHandlers } from "./FeedItemView";
 import { FeedScroller } from "./FeedScroller";
@@ -152,6 +153,7 @@ const NOTICE_MS: Record<Notice["kind"], number> = {
   share_copied: 1_800,
   // Long enough to select the link by hand.
   share_failed: 6_000,
+  intent: 2_400,
 };
 /** A held notice checks again this often whether the viewer is done with it. */
 const NOTICE_HOLD_RECHECK_MS = 1_000;
@@ -1132,8 +1134,6 @@ export function FeedApp({
       });
       setIntentOpen(false);
 
-      if (resolution.candidates.length === 0) return;
-
       const byId = new Map(data.ordered.map((item) => [item.id, item]));
       const intentItems = resolution.candidates
         .map((candidate) => byId.get(candidate.contentId))
@@ -1143,12 +1143,18 @@ export function FeedApp({
       // screen now, not the one on screen when the chip was tapped (R2).
       const headIndex = indexRef.current;
       const head = itemsRef.current[headIndex];
-      if (!head) return;
+      const reordered = intentItems.length > 0 && head !== undefined;
+      // The sheet closing is not an answer: say what changed, and only what did (UX-09).
+      showNotice({
+        kind: "intent",
+        text: intentConfirmation(chipId, reordered ? intentItems.length : 0),
+      });
+      if (!reordered) return;
       userReorderedRef.current = true;
       setItems((prev) => applyIntentPage(prev, head.id, intentItems));
       setIndex(0);
     },
-    [intentFor, loadCatalog],
+    [intentFor, loadCatalog, showNotice],
   );
 
   const showGate = shouldShowPlayGate(autoplayBlocked, userStartedPlayback);
@@ -1256,6 +1262,27 @@ export function FeedApp({
   );
   const positionOf = (item: ContentItem) =>
     episodePosition(item.episodeNumber, episodeCounts.get(item.seriesId) ?? null).text;
+
+  // Screen readers hear where a swipe or a key landed, politely (A11Y-07).
+  const [episodeAnnounced, setEpisodeAnnounced] = useState("");
+  const announcedFrom = useRef<string | null>(null);
+  const currentAnnouncement = current
+    ? episodeAnnouncement(
+        current.seriesTitle,
+        episodePosition(
+          current.episodeNumber,
+          episodeCounts.get(current.seriesId) ?? null,
+        ).label,
+      )
+    : "";
+  useEffect(() => {
+    const currentId = current?.id ?? null;
+    if (shouldAnnounceEpisode(announcedFrom.current, currentId)) {
+      setEpisodeAnnounced(currentAnnouncement);
+    }
+    announcedFrom.current = currentId;
+    // The words follow the episode: a catalog that fills in the total later is not a change.
+  }, [current?.id]);
 
   const nextStory = useMemo(
     () => (seriesEnded ? pickNextStory(items, index, feed.ordered) : null),
@@ -1636,7 +1663,18 @@ export function FeedApp({
           locale={locale}
           progressStore={progressStore}
           handlers={handlers}
+          modalOpen={intentOpen}
         />
+
+        <div
+          className={styles.visuallyHidden}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-episode-announcer="true"
+        >
+          {episodeAnnounced}
+        </div>
 
         {resumeOffer &&
         current?.id === resumeOffer.contentId &&

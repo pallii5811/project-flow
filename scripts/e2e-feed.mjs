@@ -55,10 +55,25 @@
  *  27. a notice replaces the "Next episode" label; a label fading a few seconds in
  *      does not bring "Tap for sound";
  *  28. the link shown when copying fails is a reachable field that stays while focused.
+ *
+ * Accessibility and polish (docs/decisions.md, batch 3b):
+ *  29. Space on a focused rail button presses that button, never play/pause;
+ *  30. the Tune sheet is a dialog: focus moves in, Tab stays in, the feed takes no
+ *      keys, Escape closes it from anywhere and focus returns to Tune; Close works;
+ *      a chip says what changed;
+ *  31. a rail toggle keeps its name and says its state with aria-pressed;
+ *  32. an episode change is announced politely and focus follows it from the rail;
+ *  33. a phone in landscape narrower than 768 px gets the uncropped 9:16 frame, and
+ *      no page scrolls outside the feed;
+ *  34. over a white frame every rail icon keeps 3:1 against what is behind it;
+ *  35. the mute button shrinks under the finger (touch feedback);
+ *   6. (extended) any unknown URL answers 404 with the product's page and a story to tap.
  * Checks 11 and 15 expect a "Next episode" label without a button (B2-UPNEXT).
  */
+import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
+import { inflateSync } from "node:zlib";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
@@ -284,6 +299,93 @@ async function phoneContext(browser, snapshot) {
     }, snapshot);
   }
   return context;
+}
+
+/** Decodes a Playwright PNG screenshot to RGBA pixels. */
+function decodePng(buffer) {
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let channels = 4;
+  const data = [];
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    const body = buffer.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      const colorType = body[9];
+      if (body[8] !== 8 || body[12] !== 0 || (colorType !== 2 && colorType !== 6)) {
+        throw new Error("unsupported PNG");
+      }
+      channels = colorType === 6 ? 4 : 3;
+    } else if (type === "IDAT") {
+      data.push(body);
+    }
+    offset += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(data));
+  const stride = width * channels;
+  const pixels = Buffer.alloc(width * height * 4);
+  let previous = Buffer.alloc(stride);
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * (stride + 1)];
+    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let x = 0; x < stride; x += 1) {
+      const left = x >= channels ? line[x - channels] : 0;
+      const up = previous[x];
+      const upLeft = x >= channels ? previous[x - channels] : 0;
+      let add = 0;
+      if (filter === 1) add = left;
+      else if (filter === 2) add = up;
+      else if (filter === 3) add = Math.floor((left + up) / 2);
+      else if (filter === 4) {
+        const p = left + up - upLeft;
+        const pa = Math.abs(p - left);
+        const pb = Math.abs(p - up);
+        const pc = Math.abs(p - upLeft);
+        add = pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft;
+      }
+      line[x] = (line[x] + add) & 0xff;
+    }
+    for (let x = 0; x < width; x += 1) {
+      pixels[(y * width + x) * 4] = line[x * channels];
+      pixels[(y * width + x) * 4 + 1] = line[x * channels + 1];
+      pixels[(y * width + x) * 4 + 2] = line[x * channels + 2];
+      pixels[(y * width + x) * 4 + 3] = channels === 4 ? line[x * channels + 3] : 255;
+    }
+    previous = line;
+  }
+  return { width, height, pixels };
+}
+
+/** WCAG relative luminance of an sRGB pixel. */
+function luminanceAt(pixels, index) {
+  const channel = (value) => {
+    const c = value / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return (
+    0.2126 * channel(pixels[index]) +
+    0.7152 * channel(pixels[index + 1]) +
+    0.0722 * channel(pixels[index + 2])
+  );
+}
+
+/**
+ * Contrast of an icon against what is around it, from a screenshot of its
+ * button: the brightest strokes (98th percentile) against the median pixel,
+ * which is the shaded frame behind the icon.
+ */
+function iconContrast(png) {
+  const { pixels, width, height } = decodePng(png);
+  const values = [];
+  for (let i = 0; i < width * height; i += 1) values.push(luminanceAt(pixels, i * 4));
+  values.sort((a, b) => a - b);
+  const icon = values[Math.floor(values.length * 0.98)];
+  const background = values[Math.floor(values.length / 2)];
+  return Math.round(((icon + 0.05) / (background + 0.05)) * 100) / 100;
 }
 
 function fileBytes(relativePath) {
@@ -1152,7 +1254,7 @@ try {
         const caption = active?.querySelector("[data-caption]")?.getBoundingClientRect();
         const position = active?.querySelector("[data-episode-position]");
         const video = active?.querySelector("video");
-        const mute = active?.querySelector('[aria-label="Unmute"][aria-pressed]');
+        const mute = active?.querySelector('[aria-label="Mute"][aria-pressed="true"]');
         return {
           captionBottom: caption ? Math.round(caption.bottom) : null,
           captionTop: caption ? Math.round(caption.top) : null,
@@ -1225,7 +1327,9 @@ try {
       await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
         timeout: 10_000,
       });
-      await page.click('[data-active="true"] [aria-label="Hide captions"]');
+      await page.click(
+        '[data-active="true"] [aria-label="Captions"][aria-pressed="true"]',
+      );
       const stored = await page.evaluate(() =>
         window.localStorage.getItem("project-flow.captions.v1"),
       );
@@ -1243,8 +1347,9 @@ try {
         muted: document.querySelector('[data-active="true"] video')?.muted ?? null,
         caption: document.querySelector('[data-active="true"] [data-caption]') !== null,
         toggle:
-          document.querySelector('[data-active="true"] [aria-label="Show captions"]') !==
-          null,
+          document.querySelector(
+            '[data-active="true"] [aria-label="Captions"][aria-pressed="false"]',
+          ) !== null,
       }));
       measured.captionChoice = { stored, reloaded };
       check(
@@ -1806,19 +1911,406 @@ try {
       );
       await failContext.close();
     }
+
+    // 29, 31, 32: keys on a focused rail button, fixed names, episode changes
+    // announced and followed by focus (A11Y-02, A11Y-07, A11Y-09).
+    {
+      const keysContext = await phoneContext(browser, null);
+      const page = await keysContext.newPage();
+      trackPage(page, "keyboard rail", consoleErrors, []);
+      await page.goto(`${BASE}/watch/signal-night/episode-2`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      await page.waitForFunction(
+        () =>
+          (document.querySelector('[data-active="true"] video')?.currentTime ?? 0) > 0.3,
+        null,
+        { timeout: 8_000 },
+      );
+      const rail = () =>
+        page.evaluate(() =>
+          [
+            ...document.querySelectorAll('[data-active="true"] [role="toolbar"] button'),
+          ].map((button) => [
+            button.getAttribute("aria-label"),
+            button.getAttribute("aria-pressed"),
+          ]),
+        );
+      const railBefore = await rail();
+      await page.focus('[data-active="true"] [data-action="like"]');
+      await page.keyboard.press("Space");
+      await sleep(250);
+      const afterSpace = await page.evaluate(() => ({
+        liked:
+          document
+            .querySelector('[data-active="true"] [data-action="like"]')
+            ?.getAttribute("aria-pressed") ?? null,
+        paused: document.querySelector('[data-active="true"] video')?.paused ?? null,
+      }));
+      const railAfter = await rail();
+      measured.keyboardRail = { afterSpace, railBefore, railAfter };
+      check(
+        afterSpace.liked === "true" && afterSpace.paused === false,
+        `Space on the focused Like button did not like, or paused the episode: ${JSON.stringify(afterSpace)}`,
+      );
+      check(
+        railBefore.length > 0 &&
+          railBefore.every(([label], i) => railAfter[i]?.[0] === label) &&
+          railBefore.some(([label, pressed]) => label === "Mute" && pressed === "true") &&
+          railAfter.some(([label, pressed]) => label === "Like" && pressed === "true"),
+        `a rail toggle changes its name with its state: ${JSON.stringify(measured.keyboardRail)}`,
+      );
+
+      // Focus is on Like; the arrow moves to the next episode and focus follows.
+      await page.keyboard.press("ArrowDown");
+      const moved = await page
+        .waitForFunction(
+          () =>
+            document
+              .querySelector('[data-active="true"]')
+              ?.getAttribute("data-content-id") === "item_signal_3",
+          null,
+          { timeout: 5_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      await sleep(300);
+      const announced = await page.evaluate(() => {
+        const active = document.querySelector('[data-active="true"]');
+        const region = document.querySelector("[data-episode-announcer]");
+        return {
+          region: region?.textContent ?? null,
+          polite: region?.getAttribute("aria-live") ?? null,
+          articleLabel: active?.getAttribute("aria-label") ?? null,
+          posinset: active?.getAttribute("aria-posinset") ?? null,
+          focusOnSlide: document.activeElement === active,
+        };
+      });
+      measured.episodeAnnounced = { moved, ...announced };
+      check(
+        moved &&
+          announced.region === "Signal Night, Episode 3 of 5" &&
+          announced.polite === "polite" &&
+          announced.articleLabel === "Signal Night, Episode 3 of 5" &&
+          announced.posinset !== null,
+        `an episode change is not announced or the slide has no name: ${JSON.stringify(measured.episodeAnnounced)}`,
+      );
+      check(
+        announced.focusOnSlide,
+        `focus fell back to the page when the rail it was on left: ${JSON.stringify(measured.episodeAnnounced)}`,
+      );
+
+      // 35: touch feedback on mute (the pulse no longer owns transform).
+      const muteBox = await page
+        .locator('[data-active="true"] [data-action="mute"]')
+        .boundingBox();
+      let pressedTransform = null;
+      if (muteBox) {
+        await page.mouse.move(
+          muteBox.x + muteBox.width / 2,
+          muteBox.y + muteBox.height / 2,
+        );
+        await page.mouse.down();
+        await sleep(250);
+        pressedTransform = await page.evaluate(
+          () =>
+            getComputedStyle(
+              document.querySelector('[data-active="true"] [data-action="mute"]'),
+            ).transform,
+        );
+        await page.mouse.up();
+      }
+      const scale = /matrix\(([\d.]+)/.exec(pressedTransform ?? "")?.[1];
+      measured.mutePressFeedback = pressedTransform;
+      check(
+        scale !== undefined && Number(scale) < 0.95,
+        `the mute button gives no press feedback (transform ${pressedTransform})`,
+      );
+      await keysContext.close();
+    }
+
+    // 30: the Tune sheet is a real dialog (A11Y-02, UX-09).
+    {
+      const sheetContext = await phoneContext(browser, null);
+      const page = await sheetContext.newPage();
+      trackPage(page, "tune dialog", consoleErrors, []);
+      const events = collectAnalytics(page);
+      await page.goto(`${BASE}/watch/signal-night/episode-2`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      const state = () =>
+        page.evaluate(() => {
+          const dialog = document.querySelector('[role="dialog"]');
+          const active = document.activeElement;
+          return {
+            open: dialog !== null,
+            modal: dialog?.getAttribute("aria-modal") ?? null,
+            focusInside: dialog !== null && dialog.contains(active),
+            focusOnChip: active?.hasAttribute("data-intent-chip") === true,
+            focusOnTune: active?.getAttribute("data-action") === "tune",
+            feedInert: document.querySelector('[role="feed"]')?.inert === true,
+            slide:
+              document
+                .querySelector('[data-active="true"]')
+                ?.getAttribute("data-content-id") ?? null,
+            muted: document.querySelector('[data-active="true"] video')?.muted ?? null,
+          };
+        });
+      await page.focus('[data-active="true"] [data-action="tune"]');
+      await page.keyboard.press("Enter");
+      await page.waitForSelector('[role="dialog"]', { timeout: 2_000 }).catch(() => null);
+      const opened = await state();
+      for (let i = 0; i < 9; i += 1) await page.keyboard.press("Tab");
+      const afterTabs = await state();
+      await page.keyboard.press("Shift+Tab");
+      const afterShiftTab = await state();
+      // The inert feed alone does not trap Tab: past the last chip the browser
+      // would move focus out of the page. The sheet must wrap it both ways.
+      const focusedName = () =>
+        page.evaluate(
+          () =>
+            document.activeElement?.getAttribute("data-intent-chip") ??
+            document.activeElement?.getAttribute("aria-label") ??
+            null,
+        );
+      await page.focus('[role="dialog"] [data-intent-chip="SURPRISE_ME"]');
+      await page.keyboard.press("Tab");
+      const wrapForward = await focusedName();
+      await page.keyboard.press("Shift+Tab");
+      const wrapBackward = await focusedName();
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("m");
+      await sleep(400);
+      const afterFeedKeys = await state();
+      // Escape at document level: focus is not in the sheet.
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.keyboard.press("Escape");
+      await sleep(150);
+      const afterEscape = await state();
+      // A sheet Escape failed to close would block every later tap and abort
+      // the run: close it by hand so the remaining checks still report.
+      if (afterEscape.open) {
+        await page
+          .click('[role="dialog"] [aria-label="Close"]', { timeout: 2_000 })
+          .catch(() => null);
+        await page.keyboard.press("Escape");
+        await sleep(150);
+      }
+      await page.click('[data-active="true"] [data-action="tune"]');
+      await page.waitForSelector('[role="dialog"]', { timeout: 2_000 }).catch(() => null);
+      const closeVisible = await page.isVisible('[role="dialog"] [aria-label="Close"]');
+      await page.click('[role="dialog"] [aria-label="Close"]');
+      await sleep(150);
+      const afterClose = await state();
+      await page.click('[data-active="true"] [data-action="tune"]');
+      await page.click('[data-intent-chip="DARKER"]');
+      const confirmation = await page
+        .waitForSelector('[data-notice="intent"]', { timeout: 5_000 })
+        .then((element) => element.textContent())
+        .catch(() => null);
+      const sent = events.map((event) => event.name);
+      measured.tuneDialog = {
+        opened,
+        afterTabs,
+        afterShiftTab,
+        afterFeedKeys,
+        afterEscape,
+        closeVisible,
+        afterClose,
+        confirmation,
+        wrapForward,
+        wrapBackward,
+      };
+      check(
+        opened.open && opened.modal === "true" && opened.focusOnChip && opened.feedInert,
+        `opening Tune did not move focus into a modal sheet: ${JSON.stringify(opened)}`,
+      );
+      check(
+        afterTabs.focusInside &&
+          afterShiftTab.focusInside &&
+          wrapForward === "Close" &&
+          wrapBackward === "SURPRISE_ME",
+        `Tab left the Tune sheet: ${JSON.stringify({ afterTabs, afterShiftTab, wrapForward, wrapBackward })}`,
+      );
+      check(
+        afterFeedKeys.open &&
+          afterFeedKeys.slide === opened.slide &&
+          afterFeedKeys.muted === opened.muted,
+        `keys changed the feed behind the open sheet: ${JSON.stringify({ opened, afterFeedKeys })}`,
+      );
+      check(
+        !afterEscape.open && afterEscape.focusOnTune && !afterEscape.feedInert,
+        `Escape did not close the sheet from outside it or focus did not return to Tune: ${JSON.stringify(afterEscape)}`,
+      );
+      check(
+        closeVisible && !afterClose.open,
+        `the Tune sheet has no working Close control: ${JSON.stringify({ closeVisible, afterClose })}`,
+      );
+      check(
+        typeof confirmation === "string" &&
+          /up next|Nothing new for that yet/.test(confirmation),
+        `choosing a chip said nothing: ${JSON.stringify(confirmation)}`,
+      );
+      check(
+        sent.filter((name) => name === "intent_open").length === 3 &&
+          sent.includes("intent_select"),
+        `intent events are not one per open and one per choice: ${JSON.stringify(sent.filter((name) => name.startsWith("intent")))}`,
+      );
+      await sheetContext.close();
+    }
+
+    // 33: a phone in landscape narrower than 768 px (740x360) and a portrait
+    // phone: the 9:16 frame, and no page scroll outside the feed (A11Y-03, A11Y-05).
+    {
+      const frames = {};
+      for (const viewport of [
+        { width: 740, height: 360 },
+        { width: 375, height: 812 },
+      ]) {
+        const frameContext = await browser.newContext({
+          viewport,
+          isMobile: true,
+          hasTouch: true,
+        });
+        await frameContext.addInitScript(installPlayingProbe);
+        const page = await frameContext.newPage();
+        trackPage(page, `frame ${viewport.width}x${viewport.height}`, consoleErrors, []);
+        await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+        await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+          timeout: 10_000,
+        });
+        frames[`${viewport.width}x${viewport.height}`] = await page.evaluate(() => {
+          const stage = document.querySelector('[role="feed"]')?.parentElement;
+          const box = stage?.getBoundingClientRect();
+          const rail = document
+            .querySelector('[data-active="true"] [role="toolbar"]')
+            ?.getBoundingClientRect();
+          return {
+            stage: box
+              ? [
+                  Math.round(box.left),
+                  Math.round(box.top),
+                  Math.round(box.width),
+                  Math.round(box.height),
+                ]
+              : null,
+            railInside:
+              rail !== undefined &&
+              rail.top >= 0 &&
+              rail.bottom <= window.innerHeight &&
+              box !== undefined &&
+              rail.right <= box.right,
+            pageScroll: document.documentElement.scrollHeight - window.innerHeight,
+          };
+        });
+        await frameContext.close();
+      }
+      measured.frames = frames;
+      const landscape = frames["740x360"];
+      check(
+        landscape.stage !== null &&
+          Math.abs(landscape.stage[2] - (360 * 9) / 16) <= 1 &&
+          landscape.stage[3] === 360 &&
+          Math.abs(landscape.stage[0] - (740 - landscape.stage[2]) / 2) <= 1 &&
+          landscape.railInside,
+        `at 740x360 the player is not the uncropped 9:16 frame: ${JSON.stringify(landscape)}`,
+      );
+      check(
+        Object.values(frames).every((frame) => frame.pageScroll <= 0),
+        `the page scrolls outside the feed: ${JSON.stringify(frames)}`,
+      );
+    }
+
+    // 34: over a white frame the rail stays visible: each icon keeps 3:1
+    // against the shaded picture behind it, also when pressed.
+    {
+      const brightContext = await browser.newContext({
+        viewport: { width: 375, height: 812 },
+        isMobile: true,
+        hasTouch: true,
+      });
+      await brightContext.addInitScript(installPlayingProbe);
+      const page = await brightContext.newPage();
+      trackPage(page, "bright frame rail", consoleErrors, []);
+      await page.goto(`${BASE}/watch/signal-night/episode-2`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.addStyleTag({
+        content: "video, img { filter: grayscale(1) brightness(40) !important; }",
+      });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      await sleep(900);
+      const measure = async () => {
+        const out = {};
+        for (const action of ["like", "follow", "share", "mute", "captions", "tune"]) {
+          const button = page.locator(`[data-active="true"] [data-action="${action}"]`);
+          const box = await button.boundingBox();
+          if (!box) continue;
+          const png = await page.screenshot({
+            clip: {
+              x: box.x + 7,
+              y: box.y + 7,
+              width: box.width - 14,
+              height: box.height - 14,
+            },
+          });
+          out[action] = iconContrast(png);
+        }
+        return out;
+      };
+      const idle = await measure();
+      await page.click('[data-active="true"] [data-action="like"]');
+      await page.click('[data-active="true"] [data-action="follow"]');
+      await sleep(400);
+      const pressed = await measure();
+      measured.brightFrameRail = { idle, pressed };
+      const all = [...Object.values(idle), ...Object.values(pressed)];
+      check(
+        Object.keys(idle).length === 6 && all.every((ratio) => ratio >= 3),
+        `a rail icon fades into a white frame: ${JSON.stringify(measured.brightFrameRail)}`,
+      );
+      await brightContext.close();
+    }
   }
 
-  // 6: unknown episode.
-  const missing = await context.newPage();
-  const response = await missing.goto(`${BASE}/watch/signal-night/does-not-exist`);
-  measured.unknownEpisodeStatus = response ? response.status() : null;
-  check(response?.status() === 404, `unknown episode answered ${response?.status()}`);
-  check(
-    (await missing.textContent("body"))?.includes("This episode is unavailable.") ===
-      true,
-    "unknown episode page lacks the friendly text",
-  );
-  await missing.close();
+  // 6: an unknown episode and any unknown URL: a real 404 with the product's
+  // page, which offers one story to tap (UX-10).
+  measured.notFound = {};
+  for (const path of ["/watch/signal-night/does-not-exist", "/no-such-page"]) {
+    const missing = await context.newPage();
+    // The browser logs the 404 status itself; only script errors count here.
+    missing.on("pageerror", (error) =>
+      consoleErrors.push(`404 ${path}: ${error.message}`),
+    );
+    const response = await missing.goto(`${BASE}${path}`);
+    const page404 = await missing.evaluate(() => {
+      const story = document.querySelector("[data-not-found-story]");
+      return {
+        title: document.querySelector("h1")?.textContent ?? null,
+        href: story?.getAttribute("href") ?? null,
+        underline: story ? getComputedStyle(story).textDecorationLine : null,
+        storyHeight: story ? Math.round(story.getBoundingClientRect().height) : null,
+      };
+    });
+    measured.notFound[path] = { status: response ? response.status() : null, ...page404 };
+    check(response?.status() === 404, `${path} answered ${response?.status()}`);
+    check(
+      page404.title === "This link has moved or expired." &&
+        /^\/watch\/[a-z0-9-]+\/episode-\d+$/.test(page404.href ?? "") &&
+        page404.underline === "none" &&
+        (page404.storyHeight ?? 0) >= 44,
+      `the 404 page for ${path} is not the product's page with a story: ${JSON.stringify(page404)}`,
+    );
+    await missing.close();
+  }
 
   // 7: HTML weight.
   measured.htmlBytes = {

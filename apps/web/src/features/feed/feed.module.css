@@ -32,7 +32,8 @@
   container: stage / size;
 }
 
-@media (min-width: 768px) {
+/* A tablet or a desktop window: a padded 9:16 frame. Short windows use the rule below. */
+@media (min-width: 768px) and (min-height: 481px) {
   .stageShell {
     align-items: center;
     padding: 24px;
@@ -51,16 +52,23 @@
   }
 }
 
-/* A landscape phone: the frame takes the whole height instead of losing 48 px to padding. */
-@media (min-width: 768px) and (max-height: 480px) {
+/*
+ * A phone in landscape, whatever its width (A11Y-03): the 9:16 picture takes
+ * the whole height, uncropped, instead of a full-width stage that shows a
+ * thin slice of a vertical video.
+ */
+@media (orientation: landscape) and (max-height: 480px) {
   .stageShell {
+    align-items: stretch;
     padding: 0;
+    background: radial-gradient(ellipse 55% 60% at 50% 45%, #121214 0%, #070708 72%);
   }
 
   .stage {
     width: calc(100dvh * 9 / 16);
     height: 100dvh;
     border-radius: 0;
+    contain: layout paint;
   }
 }
 
@@ -151,8 +159,8 @@
   background: linear-gradient(
     to top,
     rgba(0, 0, 0, 0.92) 0%,
-    rgba(0, 0, 0, 0.55) 38%,
-    rgba(0, 0, 0, 0.16) 68%,
+    rgba(0, 0, 0, 0.6) 45%,
+    rgba(0, 0, 0, 0.16) 72%,
     transparent 100%
   );
   z-index: 2;
@@ -160,6 +168,11 @@
 
 .slideActive {
   content-visibility: visible;
+}
+
+/* Focus lands on a slide only to keep a keyboard or screen reader user in place (A11Y-07). */
+.slide:focus {
+  outline: none;
 }
 
 /* Full-stage tap: unmute first, then play/pause. Under chrome (z4+). */
@@ -205,11 +218,6 @@
 /* The strip already names the series and the episode: nothing peeks out under it. */
 .overlayCovered > :not([data-caption]) {
   display: none;
-}
-
-.overlayInactive {
-  opacity: 0.55;
-  animation: none;
 }
 
 /* When space runs out, the hook gives way first: never the dialogue or the title. */
@@ -268,7 +276,7 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
-  color: rgba(247, 245, 242, 0.8);
+  color: rgba(247, 245, 242, 0.9);
   text-shadow: 0 1px 12px rgba(0, 0, 0, 0.7);
 }
 
@@ -388,6 +396,60 @@
   animation: railEnter 320ms var(--flow-ease-out, ease-out) 60ms both;
 }
 
+/*
+ * A soft shade behind the rail only, invisible over a dark frame: over a white
+ * one the icons keep at least 3:1 without darkening the rest of the picture.
+ */
+.rail::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -140px;
+  bottom: -110px;
+  right: -6px;
+  width: 190px;
+  /* Eased stops: a linear ramp shows a visible edge over a white frame. */
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.56) 0%,
+    rgba(0, 0, 0, 0.52) 18%,
+    rgba(0, 0, 0, 0.42) 34%,
+    rgba(0, 0, 0, 0.27) 50%,
+    rgba(0, 0, 0, 0.14) 65%,
+    rgba(0, 0, 0, 0.06) 80%,
+    rgba(0, 0, 0, 0.015) 92%,
+    transparent 100%
+  );
+  /* Feathered at both ends the same way, so the shade has no edge anywhere. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.12) 35px,
+    rgba(0, 0, 0, 0.45) 75px,
+    rgba(0, 0, 0, 0.85) 115px,
+    #000 140px,
+    #000 calc(100% - 110px),
+    rgba(0, 0, 0, 0.85) calc(100% - 90px),
+    rgba(0, 0, 0, 0.45) calc(100% - 55px),
+    rgba(0, 0, 0, 0.12) calc(100% - 25px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.12) 35px,
+    rgba(0, 0, 0, 0.45) 75px,
+    rgba(0, 0, 0, 0.85) 115px,
+    #000 140px,
+    #000 calc(100% - 110px),
+    rgba(0, 0, 0, 0.85) calc(100% - 90px),
+    rgba(0, 0, 0, 0.45) calc(100% - 55px),
+    rgba(0, 0, 0, 0.12) calc(100% - 25px),
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
 @keyframes railEnter {
   from {
     opacity: 0;
@@ -405,20 +467,19 @@
   border: none;
   border-radius: 999px;
   background: transparent;
-  color: rgba(247, 245, 242, 0.88);
+  color: #faf8f4;
   display: grid;
   place-items: center;
   cursor: pointer;
-  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.55));
+  /* A tight dark edge first: it is what separates a white stroke from a white frame. */
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.6))
+    drop-shadow(0 1px 8px rgba(0, 0, 0, 0.5));
   transition:
     color var(--flow-fast, 120ms) var(--flow-ease-soft, ease),
-    transform var(--flow-fast, 120ms) var(--flow-ease-out, ease),
-    opacity var(--flow-fast, 120ms) ease;
-  opacity: 0.92;
+    transform var(--flow-fast, 120ms) var(--flow-ease-out, ease);
 }
 
 .railButton:hover {
-  opacity: 1;
   color: #fff;
 }
 
@@ -433,7 +494,23 @@
 
 .railButton[aria-pressed="true"] {
   color: var(--flow-accent, #e8dcc8);
-  opacity: 1;
+}
+
+/* A like confirms itself with a short pop; the filled heart says the rest. */
+.railButton[data-action="like"][aria-pressed="true"] .railIcon {
+  animation: likePop 220ms var(--flow-ease-out, ease-out);
+}
+
+@keyframes likePop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.22);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .railIcon {
@@ -445,6 +522,12 @@
 .railIconFilled {
   fill: currentColor;
   stroke: currentColor;
+}
+
+/* Lines cut out of a filled glyph (captions on). */
+.railIconCutout {
+  stroke: #0b0b0c;
+  stroke-width: 1.8;
 }
 
 .playGate {
@@ -519,6 +602,8 @@
   gap: 16px;
   padding: 32px;
   text-align: center;
+  /* The failed episode's poster can be white: the message keeps AA over it. */
+  background: rgba(6, 6, 7, 0.62);
   pointer-events: none;
 }
 
@@ -547,7 +632,7 @@
   font-family: var(--font-body), sans-serif;
   font-size: 15px;
   line-height: 22px;
-  color: rgba(247, 245, 242, 0.72);
+  color: rgba(247, 245, 242, 0.92);
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
 }
 
@@ -565,7 +650,7 @@
 .sheet {
   width: 100%;
   max-width: 420px;
-  padding: 20px 18px calc(24px + env(safe-area-inset-bottom));
+  padding: 8px 10px calc(24px + env(safe-area-inset-bottom)) 18px;
   background: #121214;
   border-radius: 20px 20px 0 0;
   color: #f4f3f1;
@@ -584,20 +669,54 @@
   }
 }
 
+.sheetHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 52px;
+  margin-bottom: 6px;
+}
+
+/* 8.4:1 on the sheet (UX-09, A11Y-06); a11y.test.ts reads this value. */
 .sheetTitle {
-  margin: 0 0 14px;
+  margin: 0;
   font-family: var(--font-body), sans-serif;
   font-size: 12px;
+  line-height: 16px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #6f6d67;
+  color: #b3b0a8;
+}
+
+.sheetClose {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(247, 245, 242, 0.82);
+  cursor: pointer;
+}
+
+.sheetClose:hover {
+  color: #faf8f4;
+}
+
+.sheetClose:focus-visible {
+  outline: 2px solid var(--flow-accent, #e8dcc8);
+  outline-offset: 2px;
 }
 
 .chipRow {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  padding-right: 8px;
 }
 
 .chip {
@@ -1256,6 +1375,38 @@
   }
 }
 
+/*
+ * The 9:16 frame of a small phone in landscape (about 180-230 px wide): the
+ * title stays on one line and the hook on two, so the picture is not buried
+ * under text (A11Y-03).
+ */
+@container stage (max-width: 240px) {
+  .overlay {
+    padding-left: 10px;
+    gap: 4px;
+  }
+
+  .caption {
+    margin-bottom: 6px;
+    font-size: 15px;
+  }
+
+  .seriesTitle {
+    font-size: 19px;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
+  }
+
+  .hook {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    font-size: 13px;
+    line-height: 18px;
+  }
+}
+
 .empty {
   position: absolute;
   inset: 0;
@@ -1278,7 +1429,8 @@
   .seriesEndBody,
   .nextStory,
   .caption,
-  .pausedGlyph {
+  .pausedGlyph,
+  .railButton .railIcon {
     animation: none !important;
   }
 

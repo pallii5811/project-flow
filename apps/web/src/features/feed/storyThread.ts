@@ -176,7 +176,7 @@ export function shouldShowSoundCue(input: {
  * (R3A-04). Other notices keep their fixed time.
  */
 export function shouldHoldNotice(input: {
-  kind: "sound" | "share_copied" | "share_failed";
+  kind: "sound" | "share_copied" | "share_failed" | "intent";
   focusInside: boolean;
   selectionInside: boolean;
 }): boolean {

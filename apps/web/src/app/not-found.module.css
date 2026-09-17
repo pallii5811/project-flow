@@ -1,0 +1,223 @@
+/* The page for any unknown URL: the product's own dark stage, one story to tap (UX-10). */
+
+.root {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: calc(32px + env(safe-area-inset-top)) 20px
+    calc(32px + env(safe-area-inset-bottom));
+  background: radial-gradient(ellipse 80% 55% at 50% 38%, #141416 0%, #0b0b0c 70%);
+  color: #f4f3f1;
+}
+
+.column {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  animation: enter 360ms var(--flow-ease-out, ease-out) both;
+}
+
+.brand {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(247, 245, 242, 0.78);
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kicker {
+  margin: 0;
+  font-family: var(--font-body), sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--flow-accent, #e8dcc8);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(28px, 8vw, 34px);
+  line-height: 1.12;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: #faf8f4;
+  text-wrap: balance;
+}
+
+.body {
+  margin: 0;
+  max-width: 32ch;
+  font-family: var(--font-body), sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  color: rgba(247, 245, 242, 0.78);
+  text-wrap: pretty;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 72px 1fr 44px;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px 10px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(247, 245, 242, 0.07);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    transform var(--flow-fast, 120ms) ease,
+    border-color var(--flow-fast, 120ms) ease;
+}
+
+.card:hover {
+  border-color: rgba(232, 220, 200, 0.4);
+}
+
+.card:active {
+  transform: scale(0.98);
+}
+
+.card:focus-visible,
+.button:focus-visible {
+  outline: 2px solid var(--flow-accent, #e8dcc8);
+  outline-offset: 3px;
+}
+
+.poster {
+  width: 72px;
+  height: 108px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #141416;
+}
+
+.cardText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cardLabel {
+  font-family: var(--font-body), sans-serif;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(247, 245, 242, 0.7);
+}
+
+.cardTitle {
+  font-family: var(--font-display), sans-serif;
+  font-size: 19px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #faf8f4;
+}
+
+.cardHook {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-family: var(--font-body), sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  color: rgba(247, 245, 242, 0.8);
+}
+
+.cardMeta {
+  font-family: var(--font-body), sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  color: rgba(247, 245, 242, 0.66);
+  font-variant-numeric: tabular-nums;
+}
+
+.play {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding-left: 3px;
+  border-radius: 999px;
+  background: var(--flow-accent, #e8dcc8);
+  color: #141210;
+}
+
+.button {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 22px;
+  border-radius: 999px;
+  background: var(--flow-accent, #e8dcc8);
+  color: #141210;
+  font-family: var(--font-body), sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* A phone in landscape: the message and the story side by side, all on one screen. */
+@media (orientation: landscape) and (max-height: 480px) {
+  .root {
+    padding-top: calc(20px + env(safe-area-inset-top));
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+
+  .column {
+    max-width: 760px;
+    display: grid;
+    grid-template-columns: 1fr minmax(280px, 340px);
+    align-items: center;
+    gap: 18px 36px;
+  }
+
+  .brand {
+    grid-column: 1 / -1;
+  }
+
+  .title {
+    font-size: 26px;
+  }
+
+  .body {
+    font-size: 15px;
+    line-height: 22px;
+  }
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .column {
+    animation: none;
+  }
+}

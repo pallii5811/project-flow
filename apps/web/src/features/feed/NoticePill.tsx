@@ -7,7 +7,7 @@ import styles from "./feed.module.css";
 export type Notice = {
   /** Changes with each notice, so the same message twice still re-announces. */
   id: number;
-  kind: "sound" | "share_copied" | "share_failed";
+  kind: "sound" | "share_copied" | "share_failed" | "intent";
   text: string;
   /** A link the viewer can copy by hand when the clipboard refused. */
   detail?: string;
@@ -109,7 +109,9 @@ function NoticeBody({
       {/* The text is already announced by the status region above. */}
       <span className={styles.noticeRow} aria-hidden="true">
         {notice.kind === "sound" ? <SpeakerGlyph /> : null}
-        {notice.kind === "share_copied" ? <CheckGlyph /> : null}
+        {notice.kind === "share_copied" || notice.kind === "intent" ? (
+          <CheckGlyph />
+        ) : null}
         <span>{notice.text}</span>
       </span>
       {notice.detail ? (

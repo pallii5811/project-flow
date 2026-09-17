@@ -8,6 +8,7 @@ import {
   FeedSlidePlaceholder,
   type FeedItemHandlers,
 } from "./FeedItemView";
+import { feedKeyAction, shouldMoveFocusToSlide } from "./a11y";
 import { isAtSlide, settledIndex, type FailureHold } from "./feedLogic";
 import type { ProgressStore } from "./progressStore";
 import styles from "./feed.module.css";
@@ -42,6 +43,11 @@ type FeedScrollerProps = {
   /** Stable identity (createStableHandlers): memoized slides depend on it. */
   handlers: FeedItemHandlers;
   scrollerRef?: RefObject<HTMLDivElement | null>;
+  /**
+   * A modal sheet is open: the feed takes no keys and is inert behind it, so
+   * Tab and screen readers stay in the sheet.
+   */
+  modalOpen?: boolean;
 };
 
 export function FeedScroller({
@@ -62,6 +68,7 @@ export function FeedScroller({
   progressStore,
   handlers,
   scrollerRef,
+  modalOpen = false,
 }: FeedScrollerProps): ReactElement {
   const localRef = useRef<HTMLDivElement | null>(null);
   const setRef = useCallback(
@@ -129,32 +136,93 @@ export function FeedScroller({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const tag = (event.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        if (index < items.length - 1) onIndexChange(index + 1);
-      } else if (event.key === "ArrowUp") {
-        event.preventDefault();
-        if (index > 0) onIndexChange(index - 1);
-      } else if (event.key === " " || event.code === "Space") {
-        event.preventDefault();
-        handlers.onTogglePlayPause();
-      } else if (event.key === "m" || event.key === "M") {
-        event.preventDefault();
-        handlers.onToggleMute("key");
-      } else if (event.key === "c" || event.key === "C") {
-        handlers.onToggleCaptions();
+      const target = event.target instanceof Element ? event.target : null;
+      const action = feedKeyAction({
+        key: event.key,
+        code: event.code,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        defaultPrevented: event.defaultPrevented,
+        dialogOpen: modalOpen,
+        inDialog: target?.closest('[role="dialog"]') != null,
+        inTextField:
+          target?.closest('input, textarea, select, [contenteditable="true"]') != null,
+        onControl: target?.closest('button, a[href], [role="button"], summary') != null,
+      });
+      if (action === null) return;
+      switch (action) {
+        case "next":
+          event.preventDefault();
+          if (index < items.length - 1) onIndexChange(index + 1);
+          break;
+        case "previous":
+          event.preventDefault();
+          if (index > 0) onIndexChange(index - 1);
+          break;
+        case "toggle_play":
+          event.preventDefault();
+          handlers.onTogglePlayPause();
+          break;
+        case "toggle_mute":
+          event.preventDefault();
+          handlers.onToggleMute("key");
+          break;
+        case "toggle_captions":
+          handlers.onToggleCaptions();
+          break;
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handlers, index, items.length, onIndexChange]);
+  }, [handlers, index, items.length, modalOpen, onIndexChange]);
+
+  // Where focus last was: in the feed, or somewhere else on the page. A
+  // focused rail button unmounts with its slide and fires no event, so this
+  // is the only way to know it was there (A11Y-07).
+  const lastFocusInFeed = useRef(false);
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      const root = localRef.current;
+      lastFocusInFeed.current =
+        root !== null && event.target instanceof Node && root.contains(event.target);
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
+
+  // The episode changed while focus was in the feed: it moves to the new
+  // slide instead of falling back to the page with the old rail.
+  const focusedIndex = useRef(index);
+  useEffect(() => {
+    if (focusedIndex.current === index) return;
+    focusedIndex.current = index;
+    const root = localRef.current;
+    if (!root) return;
+    const active = document.activeElement;
+    const now =
+      active === null || active === document.body
+        ? "page"
+        : root.contains(active)
+          ? "feed"
+          : "elsewhere";
+    if (!shouldMoveFocusToSlide(lastFocusInFeed.current, now)) return;
+    const slide = root.children.item(index);
+    if (slide instanceof HTMLElement && !slide.contains(active)) {
+      slide.focus({ preventScroll: true });
+    }
+  }, [index]);
 
   return (
-    <div className={styles.scroller} ref={setRef} tabIndex={0} role="feed">
+    <div
+      className={styles.scroller}
+      ref={setRef}
+      tabIndex={0}
+      role="feed"
+      aria-label="Episodes"
+      inert={modalOpen}
+    >
       {items.map((item, itemIndex) => {
         // Far slides are empty boxes: the list can hold a whole page while
         // only the slides around the playing one download anything.
@@ -171,6 +239,7 @@ export function FeedScroller({
           <FeedItemView
             key={item.id}
             item={item}
+            position={itemIndex + 1}
             active={active}
             preload={preload}
             muted={muted}
