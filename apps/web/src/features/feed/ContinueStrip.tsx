@@ -6,21 +6,23 @@ import styles from "./feed.module.css";
 
 type ContinueStripProps = {
   seriesTitle: string;
+  /** "Episode 3 / 60" */
   episodeLabel: string;
-  /** "Continue story", or "Up next" when the saved episode was finished. */
-  label?: string;
   onContinue: () => void;
 };
 
+/**
+ * A returning viewer landed mid-episode: Continue jumps to the saved moment
+ * (the episode plays from its start behind the strip until then).
+ */
 export function ContinueStrip({
   seriesTitle,
   episodeLabel,
-  label = "Continue story",
   onContinue,
 }: ContinueStripProps): ReactElement {
   return (
-    <div className={styles.strip} role="region" aria-label="Continue story">
-      <p className={styles.stripLabel}>{label}</p>
+    <div className={styles.strip} role="region" aria-label="Continue story" data-resume-offer="resume">
+      <p className={styles.stripLabel}>Continue story</p>
       <p className={styles.stripTitle}>{seriesTitle}</p>
       <p className={styles.stripMeta}>{episodeLabel}</p>
       <button
@@ -31,6 +33,28 @@ export function ContinueStrip({
       >
         Continue
       </button>
+    </div>
+  );
+}
+
+/**
+ * A returning viewer who finished an episode lands on the next one, already
+ * playing from its start. There is nothing to press (B2-UPNEXT): a short
+ * label says where they are, then fades on its own.
+ */
+export function UpNextLabel({
+  seriesTitle,
+  episodeLabel,
+}: {
+  seriesTitle: string;
+  episodeLabel: string;
+}): ReactElement {
+  return (
+    <div className={styles.upNext} role="status" data-resume-offer="next_episode">
+      <span className={styles.upNextKicker}>Next episode</span>
+      <span className={styles.upNextText}>
+        {seriesTitle} · {episodeLabel}
+      </span>
     </div>
   );
 }

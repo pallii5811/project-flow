@@ -3,6 +3,7 @@
 import { useCallback, useSyncExternalStore, type ReactElement } from "react";
 
 import type { ProgressStore } from "./progressStore";
+import { episodePosition } from "./storyThread";
 import styles from "./feed.module.css";
 
 type ContentOverlayProps = {
@@ -10,6 +11,11 @@ type ContentOverlayProps = {
   seriesTitle: string;
   hook: string;
   episodeNumber: number;
+  episodeCount: number | null;
+  /** Dialogue to show now (captions on and a cue active), else null. */
+  caption: string | null;
+  /** The Continue strip lies over the title block. */
+  covered?: boolean;
   progressStore: ProgressStore;
   active?: boolean;
 };
@@ -53,19 +59,41 @@ export function ContentOverlay({
   seriesTitle,
   hook,
   episodeNumber,
+  episodeCount,
+  caption,
+  covered = false,
   progressStore,
   active = true,
 }: ContentOverlayProps): ReactElement {
+  const position = episodePosition(episodeNumber, episodeCount);
   return (
     <>
       <div className={styles.scrimTop} aria-hidden="true" />
       <div className={styles.scrimBottom} aria-hidden="true" />
       <div
-        className={`${styles.overlay}${active ? "" : ` ${styles.overlayInactive}`}`}
+        className={`${styles.overlay}${active ? "" : ` ${styles.overlayInactive}`}${covered ? ` ${styles.overlayCovered}` : ""}`}
       >
+        {/*
+          Captions sit in the same column, right above the title block: over
+          the scrim, never under the text, whatever the title's length (A11Y-01).
+          The slot keeps no height when empty, so nothing jumps between cues
+          except the dialogue itself.
+        */}
+        {caption ? (
+          <p className={styles.caption} data-caption="true">
+            {caption.split("\n").map((line, lineIndex) => (
+              <span key={lineIndex} className={styles.captionRow}>
+                <span className={styles.captionLine}>{line}</span>
+              </span>
+            ))}
+          </p>
+        ) : null}
+        <p className={styles.episodeKicker} data-episode-position="true">
+          <span aria-hidden="true">{position.text}</span>
+          <span className={styles.visuallyHidden}>{position.label}</span>
+        </p>
         <h2 className={styles.seriesTitle}>{seriesTitle}</h2>
         <p className={styles.hook}>{hook}</p>
-        <p className={styles.episodeLabel}>Episode {episodeNumber}</p>
       </div>
       {active ? <ProgressEdge contentId={contentId} progressStore={progressStore} /> : null}
     </>

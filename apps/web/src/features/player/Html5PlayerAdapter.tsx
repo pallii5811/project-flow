@@ -31,7 +31,6 @@ export type Html5PlayerAdapterProps = {
   muted: boolean;
   seekToMs?: number | null;
   preload?: "none" | "metadata" | "auto";
-  captionsOn: boolean;
   captionTracks: CaptionTrack[];
   events: PlayerAdapterEvents;
 };
@@ -99,7 +98,6 @@ export function Html5PlayerAdapter({
   muted,
   seekToMs = null,
   preload = "auto",
-  captionsOn,
   captionTracks,
   events,
 }: Html5PlayerAdapterProps): ReactElement {
@@ -585,15 +583,44 @@ export function Html5PlayerAdapter({
     applyHlsPlan();
   }, [preload]);
 
+  // The browser never draws cues itself: native cues land under the bottom
+  // scrim and the title (A11Y-01). Tracks stay "hidden", which still loads
+  // them and keeps activeCues current, and the app renders the text.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    for (let i = 0; i < video.textTracks.length; i += 1) {
-      const track = video.textTracks[i];
-      if (!track) continue;
-      track.mode = captionsOn ? "showing" : "hidden";
-    }
-  }, [captionsOn, captionTracks, source.contentId]);
+    const list = video.textTracks;
+    const watched = new Set<TextTrack>();
+    const report = (track: TextTrack) => {
+      if (track.mode === "disabled") return;
+      const cues = track.activeCues;
+      const payloads: string[] = [];
+      if (cues) {
+        for (let i = 0; i < cues.length; i += 1) {
+          const cue = cues[i] as (TextTrackCue & { text?: string }) | undefined;
+          if (cue && typeof cue.text === "string") payloads.push(cue.text);
+        }
+      }
+      eventsRef.current.onCueChange?.(payloads);
+    };
+    const onCueChange = (event: Event) => report(event.target as TextTrack);
+    const watch = () => {
+      for (let i = 0; i < list.length; i += 1) {
+        const track = list[i];
+        if (!track || watched.has(track)) continue;
+        track.mode = "hidden";
+        watched.add(track);
+        track.addEventListener("cuechange", onCueChange);
+        report(track);
+      }
+    };
+    watch();
+    list.addEventListener("addtrack", watch);
+    return () => {
+      list.removeEventListener("addtrack", watch);
+      for (const track of watched) track.removeEventListener("cuechange", onCueChange);
+    };
+  }, [captionTracks, source.contentId]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -717,7 +744,6 @@ export function Html5PlayerAdapter({
             srcLang={track.language}
             src={track.url}
             label={track.language}
-            default={track.default}
           />
         ))}
     </video>

@@ -47,6 +47,11 @@ export type PlayerAdapterEvents = {
   /** Rebuffering after the first frame; startup waiting is not rebuffering. */
   onBufferingStart?: () => void;
   onBufferingEnd?: () => void;
+  /**
+   * The cues active now changed (payloads as written in the WebVTT file, empty
+   * when none is active). The app renders them; the browser never does.
+   */
+  onCueChange?: (payloads: string[]) => void;
 };
 
 export type PlayerAdapterProps = {

@@ -28,6 +28,8 @@ type FeedScrollerProps = {
   onIndexChange: (next: number, gestureStartedAt?: number) => void;
   muted: boolean;
   captionsOn: boolean;
+  /** Episodes per series, from the catalog the feed knows. */
+  episodeCounts: ReadonlyMap<string, number>;
   likedIds: Set<string>;
   followingIds: Set<string>;
   seekToMs: number | null;
@@ -48,6 +50,7 @@ export function FeedScroller({
   onIndexChange,
   muted,
   captionsOn,
+  episodeCounts,
   likedIds,
   followingIds,
   seekToMs,
@@ -139,7 +142,7 @@ export function FeedScroller({
         handlers.onTogglePlayPause();
       } else if (event.key === "m" || event.key === "M") {
         event.preventDefault();
-        handlers.onToggleMute();
+        handlers.onToggleMute("key");
       } else if (event.key === "c" || event.key === "C") {
         handlers.onToggleCaptions();
       }
@@ -173,7 +176,8 @@ export function FeedScroller({
             active={active}
             preload={preload}
             muted={muted}
-            captionsOn={captionsOn}
+            captionsOn={captionsOn && item.captionsAvailable}
+            episodeCount={episodeCounts.get(item.seriesId) ?? null}
             liked={likedIds.has(item.id)}
             following={followingIds.has(item.seriesId)}
             seekToMs={active ? seekToMs : null}

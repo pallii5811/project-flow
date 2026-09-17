@@ -61,12 +61,30 @@ import {
 import { LaunchDiagPanel } from "@/features/diagnostics/LaunchDiagPanel";
 import { patchLaunchDiagnostics } from "@/features/diagnostics/launchDiagnostics";
 
-import { ContinueStrip } from "./ContinueStrip";
+import { ContinueStrip, UpNextLabel } from "./ContinueStrip";
 import type { FeedItemHandlers } from "./FeedItemView";
 import { FeedScroller } from "./FeedScroller";
 import { FeedStage } from "./FeedStage";
 import { IntentSheet } from "./IntentSheet";
+import { NoticePill, type Notice } from "./NoticePill";
 import { SeriesEnd } from "./SeriesEnd";
+import {
+  CAPTIONS_PREFERENCE_KEY,
+  SOUND_CUE_SESSION_KEY,
+  SOUND_CUE_VISIBLE_MS,
+  effectiveCaptions,
+  episodePosition,
+  migratedCaptionChoice,
+  parseCaptionChoice,
+  parseShareStartMs,
+  pickNextStory,
+  placeStory,
+  serializeCaptionChoice,
+  shareStartSeconds,
+  shouldShowSoundCue,
+  storyShareTarget,
+  type CaptionChoice,
+} from "./storyThread";
 import {
   ERROR_SKIP_DELAY_MS,
   buildShareUrl,
@@ -126,10 +144,36 @@ function whenIdle(callback: () => void): () => void {
   return () => window.clearTimeout(timer);
 }
 
+/** How long each notice stays; the sound cue also leaves at the first tap. */
+const NOTICE_MS: Record<Notice["kind"], number> = {
+  sound: SOUND_CUE_VISIBLE_MS,
+  share_copied: 1_800,
+  // Long enough to select the link by hand.
+  share_failed: 6_000,
+};
+/** The "Next episode" label of a returning viewer fades after this. */
+const UP_NEXT_LABEL_MS = 4_000;
+
+function readStored(storage: "local" | "session", key: string): string | null {
+  try {
+    return (storage === "local" ? window.localStorage : window.sessionStorage).getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(storage: "local" | "session", key: string, value: string): void {
+  try {
+    (storage === "local" ? window.localStorage : window.sessionStorage).setItem(key, value);
+  } catch {
+    // private mode or blocked storage: the choice lasts for this page only
+  }
+}
+
 /** A move to another episode whose first frame is still to come (MP-1). */
 type PendingTransition = {
   toContentId: string;
-  kind: "swipe" | "auto_continue" | "error_skip";
+  kind: "swipe" | "auto_continue" | "error_skip" | "next_story";
   /** performance.now() when the move started. */
   startedAt: number;
 };
@@ -188,7 +232,20 @@ export function FeedApp({
   const [pageReady, setPageReady] = useState(false);
 
   const [muted, setMuted] = useState(true);
-  const [captionsOn, setCaptionsOn] = useState(false);
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
+  /** The viewer's explicit caption choice; null follows the sound (decision 3). */
+  const [captionChoice, setCaptionChoice] = useState<CaptionChoice>(null);
+  const captionChoiceRef = useRef(captionChoice);
+  captionChoiceRef.current = captionChoice;
+  const captionsOn = effectiveCaptions(captionChoice, muted, true);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const noticeSeq = useRef(0);
+  /** The active episode whose first frame is on screen (for the sound cue). */
+  const [framedContentId, setFramedContentId] = useState<string | null>(null);
+  const soundCueShown = useRef(false);
+  /** `?t=` of a shared link, applied to the landing episode only (OPP-02). */
+  const shareStartMs = useRef<number | null>(null);
   const [likedIds, setLikedIds] = useState<Set<string>>(() => new Set());
   const [followingIds, setFollowingIds] = useState<Set<string>>(() => new Set());
   const [progressStore] = useState(createProgressStore);
@@ -411,7 +468,15 @@ export function FeedApp({
     if (!initialContentId || deepLinkTracked.current) return;
     deepLinkTracked.current = true;
     const item = feedRef.current.ordered.find((entry) => entry.id === initialContentId);
+    // A shared moment opens where it was shared (OPP-02). The first play stays
+    // an autoplay: the seek is applied before the first frame.
+    const startMs = item ? parseShareStartMs(window.location.search, item.durationMs) : null;
+    if (startMs !== null) {
+      shareStartMs.current = startMs;
+      setSeekToMs(startMs);
+    }
     analytics.track("share_landing", {
+      start_ms: startMs,
       route:
         deepLinkRoute ??
         (typeof window !== "undefined" ? window.location.pathname : null),
@@ -441,6 +506,14 @@ export function FeedApp({
     }
   }, [analytics, deepLinkRoute, initialContentId]);
 
+  // The explicit caption choice, the same for every series. Read before the
+  // resume point, which only migrates a choice when none is stored.
+  useEffect(() => {
+    const stored = parseCaptionChoice(readStored("local", CAPTIONS_PREFERENCE_KEY));
+    if (stored !== null) setCaptionChoice(stored);
+    soundCueShown.current = readStored("session", SOUND_CUE_SESSION_KEY) === "1";
+  }, []);
+
   // Resume from localStorage (non-blocking). Sound always starts off: a saved
   // unmuted preference would make the browser refuse autoplay (PB-3).
   useEffect(() => {
@@ -454,7 +527,9 @@ export function FeedApp({
         const saved = await resumeStore.loadForSeries(target.seriesId);
         if (cancelled || !saved) return;
         lastResumeRef.current = saved;
-        setCaptionsOn(saved.captionsOn);
+        setCaptionChoice((choice) => migratedCaptionChoice(choice, saved.captionsOn));
+        // The shared moment is what the link was for: no offer to go elsewhere.
+        if (shareStartMs.current !== null) return;
         if (saved.contentId === initialContentId && isResumable(saved)) {
           // No move and no seek yet: the first play stays an autoplay (MP-2).
           setResumeOffer({ contentId: saved.contentId, positionMs: saved.positionMs, reason: "resume" });
@@ -466,7 +541,7 @@ export function FeedApp({
       const snapshot = await resumeStore.load();
       if (cancelled || !snapshot) return;
       lastResumeRef.current = snapshot;
-      setCaptionsOn(snapshot.captionsOn);
+      setCaptionChoice((choice) => migratedCaptionChoice(choice, snapshot.captionsOn));
 
       const nextEpisodeIn = (data: FeedData) => (contentId: string) => {
         const saved = data.ordered.find((item) => item.id === contentId);
@@ -659,7 +734,9 @@ export function FeedApp({
       nextItems: ContentItem[] = items,
       gestureStartedAt?: number,
     ) => {
-      if (next === index) return;
+      // Same position with a different list is a move (placeStory can put the
+      // next story where the viewer already is).
+      if (next === index && nextItems === items) return;
       const from = items[index];
       if (from) {
         const watched = progressStore.get(from.id);
@@ -819,7 +896,8 @@ export function FeedApp({
       positionMs,
       durationMs: durationMs || item.durationMs,
       muted,
-      captionsOn,
+      // Only an explicit choice is saved: the muted default is not one.
+      captionsOn: captionChoiceRef.current === true,
       updatedAt: Date.now(),
       completed: false,
     });
@@ -841,7 +919,8 @@ export function FeedApp({
       positionMs: item.durationMs,
       durationMs: item.durationMs,
       muted,
-      captionsOn,
+      // Only an explicit choice is saved: the muted default is not one.
+      captionsOn: captionChoiceRef.current === true,
       updatedAt: Date.now(),
       completed: true,
     });
@@ -911,49 +990,78 @@ export function FeedApp({
     })();
   };
 
+  const showNotice = useCallback((next: Omit<Notice, "id">) => {
+    noticeSeq.current += 1;
+    setNotice({ ...next, id: noticeSeq.current });
+  }, []);
+
+  /**
+   * rail: the episode on screen, at the moment shared (OPP-02).
+   * series_end: the story from its first episode, never the finale.
+   */
   const handleShare = useCallback(
-    async (item: ContentItem) => {
+    async (item: ContentItem, source: "rail" | "series_end") => {
       const origin = typeof window !== "undefined" ? window.location.origin : "";
       const shareId = createShareId();
-      const url = buildShareUrl(feedRef.current.catalog, item, origin, {
+      const target =
+        source === "series_end" ? storyShareTarget(item, feedRef.current.ordered) : item;
+      const startSeconds =
+        source === "rail"
+          ? shareStartSeconds(progressStore.get(item.id) * item.durationMs, item.durationMs)
+          : null;
+      const url = buildShareUrl(feedRef.current.catalog, target, origin, {
         utmSource: "share",
         utmMedium: "social",
+        ...(source === "series_end" ? { utmCampaign: "series_end" } : {}),
         shareId,
+        startSeconds,
       });
       if (!url) return;
       analytics.track("share_open", {
-        content_id: item.id,
-        series_id: item.seriesId,
-        episode_id: item.episodeId,
+        content_id: target.id,
+        series_id: target.seriesId,
+        episode_id: target.episodeId,
         share_id: shareId,
+        source,
+        start_seconds: startSeconds,
       });
-      try {
-        if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+        try {
           await navigator.share({
-            title: item.seriesTitle,
-            text: item.hook.replace(/\n/g, " "),
+            title: target.seriesTitle,
+            text: target.hook.replace(/\n/g, " "),
             url,
           });
           analytics.track("share_native", {
-            content_id: item.id,
+            content_id: target.id,
             share_id: shareId,
           });
           return;
+        } catch (error) {
+          // Closing the share sheet is a choice: the clipboard stays untouched (VIR-3).
+          if (error instanceof DOMException && error.name === "AbortError") {
+            analytics.track("share_cancel", { content_id: target.id, share_id: shareId });
+            return;
+          }
+          // Any other refusal (no sheet in this browser): copy the link instead.
         }
-      } catch {
-        // fall through to clipboard
       }
       try {
+        if (typeof navigator === "undefined" || !navigator.clipboard) {
+          throw new Error("clipboard unavailable");
+        }
         await navigator.clipboard.writeText(url);
         analytics.track("share_copy", {
-          content_id: item.id,
+          content_id: target.id,
           share_id: shareId,
         });
+        showNotice({ kind: "share_copied", text: "Link copied" });
       } catch {
-        // share best-effort
+        analytics.track("share_copy_failed", { content_id: target.id, share_id: shareId });
+        showNotice({ kind: "share_failed", text: "Couldn’t copy the link", detail: url });
       }
     },
-    [analytics],
+    [analytics, progressStore, showNotice],
   );
 
   const handleIntentChip = useCallback(
@@ -989,6 +1097,103 @@ export function FeedApp({
 
   const showGate = shouldShowPlayGate(autoplayBlocked, userStartedPlayback);
 
+  /** wasMuted: the state the viewer changed; the new one is its opposite. */
+  const setSound = (wasMuted: boolean, source: "surface" | "rail" | "key") => {
+    const nextMuted = !wasMuted;
+    mutedRef.current = nextMuted;
+    setMuted(nextMuted);
+    setNotice((shown) => (shown?.kind === "sound" ? null : shown));
+    analytics.track("sound_toggled", {
+      content_id: current?.id ?? null,
+      muted: nextMuted,
+      source,
+      captions_on: effectiveCaptions(captionChoiceRef.current, nextMuted, true),
+    });
+  };
+
+  // "Tap for sound", once per browser session, for the first episode that
+  // plays muted with nothing else on screen (UX-02).
+  const cueBlocked =
+    showGate ||
+    seriesEnded !== null ||
+    intentOpen ||
+    resumeOffer !== null ||
+    playbackFailure !== null ||
+    notice !== null;
+  useEffect(() => {
+    if (
+      !shouldShowSoundCue({
+        muted,
+        playing: current !== null && framedContentId === current.id,
+        alreadyShown: soundCueShown.current,
+        blocked: cueBlocked,
+      })
+    ) {
+      return;
+    }
+    soundCueShown.current = true;
+    writeStored("session", SOUND_CUE_SESSION_KEY, "1");
+    showNotice({ kind: "sound", text: "Tap for sound" });
+    analytics.track("sound_cue_shown", { content_id: current?.id ?? null });
+  }, [analytics, cueBlocked, current, framedContentId, muted, showNotice]);
+
+  // Each notice leaves on its own; the sound cue also at the first touch or key.
+  useEffect(() => {
+    if (!notice) return;
+    const shown = notice.id;
+    const hide = () => setNotice((value) => (value?.id === shown ? null : value));
+    const timer = window.setTimeout(hide, NOTICE_MS[notice.kind]);
+    if (notice.kind !== "sound") return () => window.clearTimeout(timer);
+    window.addEventListener("pointerdown", hide, true);
+    window.addEventListener("keydown", hide, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("pointerdown", hide, true);
+      window.removeEventListener("keydown", hide, true);
+    };
+  }, [notice]);
+
+  // "Next episode" is a label, not a control: it fades by itself (B2-UPNEXT).
+  useEffect(() => {
+    if (resumeOffer?.reason !== "next_episode") return;
+    const offer = resumeOffer;
+    const timer = window.setTimeout(
+      () => setResumeOffer((value) => (value === offer ? null : value)),
+      UP_NEXT_LABEL_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [resumeOffer]);
+
+  const episodeCounts = useMemo(
+    () => new Map(feed.catalog.series.map((series) => [series.id, series.totalEpisodes])),
+    [feed.catalog],
+  );
+  const positionOf = (item: ContentItem) =>
+    episodePosition(item.episodeNumber, episodeCounts.get(item.seriesId) ?? null).text;
+
+  const nextStory = useMemo(
+    () => (seriesEnded ? pickNextStory(items, index, feed.ordered) : null),
+    [feed.ordered, index, items, seriesEnded],
+  );
+  // What the end of a series offered, once per ending: the handoff rate is
+  // next_story_open over next_story_offered.
+  const offeredFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!seriesEnded || !current) {
+      offeredFor.current = null;
+      return;
+    }
+    if (offeredFor.current === current.id) return;
+    offeredFor.current = current.id;
+    analytics.track("next_story_offered", {
+      content_id: current.id,
+      series_id: current.seriesId,
+      kind: seriesEnded,
+      next_content_id: nextStory?.id ?? null,
+      next_series_id: nextStory?.seriesId ?? null,
+    });
+  }, [analytics, current, nextStory, seriesEnded]);
+
   const handlePlayGate = () => {
     if (!firstPlayMarked.current && gateTapAt.current === null) {
       gateTapAt.current = performance.now();
@@ -1021,17 +1226,22 @@ export function FeedApp({
   };
 
   const handlerImpl: FeedItemHandlers = {
-    onToggleMute: () => setMuted((value) => !value),
-    onUnmute: () => setMuted(false),
+    onToggleMute: (source) => setSound(mutedRef.current, source),
+    onUnmute: () => {
+      if (mutedRef.current) setSound(true, "surface");
+    },
     onToggleCaptions: () => {
-      setCaptionsOn((value) => {
-        const next = !value;
-        analytics.track("caption_toggled", {
-          session_id: sessionId,
-          captions_on: next,
-          content_id: current?.id ?? null,
-        });
-        return next;
+      // The explicit choice wins from now on, whatever the sound does, and is
+      // remembered on this device (decision 3).
+      const next = !effectiveCaptions(captionChoiceRef.current, mutedRef.current, true);
+      captionChoiceRef.current = next;
+      setCaptionChoice(next);
+      writeStored("local", CAPTIONS_PREFERENCE_KEY, serializeCaptionChoice(next));
+      analytics.track("caption_toggled", {
+        session_id: sessionId,
+        captions_on: next,
+        muted: mutedRef.current,
+        content_id: current?.id ?? null,
       });
     },
     onTogglePlayPause: () => playToggleRef.current(),
@@ -1083,7 +1293,7 @@ export function FeedApp({
       });
     },
     onShare: (item) => {
-      void handleShare(item);
+      void handleShare(item, "rail");
     },
     onTune: () => {
       if (!flags.isEnabled("INTENT_LAYER")) return;
@@ -1161,6 +1371,7 @@ export function FeedApp({
       setUserStartedPlayback(true);
     },
     onMutedFallback: (item) => {
+      mutedRef.current = true;
       setMuted(true);
       analytics.track("autoplay_muted_fallback", {
         content_id: item.id,
@@ -1174,6 +1385,7 @@ export function FeedApp({
     },
     onPlaying: (item, info) => {
       if (item.id !== current?.id) return;
+      setFramedContentId(item.id);
       setAutoplayBlocked(false);
       setUserStartedPlayback(true);
       patchLaunchDiagnostics({
@@ -1308,6 +1520,7 @@ export function FeedApp({
           onIndexChange={handleScrollerIndexChange}
           muted={muted}
           captionsOn={captionsOn}
+          episodeCounts={episodeCounts}
           likedIds={likedIds}
           followingIds={followingIds}
           seekToMs={seekToMs}
@@ -1323,11 +1536,14 @@ export function FeedApp({
           handlers={handlers}
         />
 
-        {resumeOffer && current?.id === resumeOffer.contentId ? (
+        {resumeOffer && current?.id === resumeOffer.contentId && resumeOffer.reason === "next_episode" ? (
+          <UpNextLabel seriesTitle={current.seriesTitle} episodeLabel={positionOf(current)} />
+        ) : null}
+
+        {resumeOffer && current?.id === resumeOffer.contentId && resumeOffer.reason !== "next_episode" ? (
           <ContinueStrip
             seriesTitle={current.seriesTitle}
-            episodeLabel={`Episode ${current.episodeNumber}`}
-            label={resumeOffer.reason === "next_episode" ? "Up next" : "Continue story"}
+            episodeLabel={positionOf(current)}
             onContinue={() => {
               // Seeks right away when the episode is loaded (PB-2).
               if (resumeOffer.positionMs > 0) setSeekToMs(resumeOffer.positionMs);
@@ -1350,14 +1566,42 @@ export function FeedApp({
           <SeriesEnd
             seriesTitle={current.seriesTitle}
             kind={seriesEnded}
-            onDismiss={() => {
-              setSeriesEnded(null);
-              if (index < items.length - 1) {
-                handleIndexChange(index + 1);
-              }
+            position={
+              seriesEnded === "series_complete" && episodeCounts.get(current.seriesId)
+                ? `${episodeCounts.get(current.seriesId)} episodes`
+                : positionOf(current)
+            }
+            following={followingIds.has(current.seriesId)}
+            nextStory={
+              nextStory
+                ? {
+                    contentId: nextStory.id,
+                    seriesTitle: nextStory.seriesTitle,
+                    hook: nextStory.hook.replace(/\n/g, " "),
+                    posterUrl: nextStory.playback.posterReference || nextStory.thumbnailUrl,
+                    position: positionOf(nextStory),
+                  }
+                : null
+            }
+            onShare={() => void handleShare(current, "series_end")}
+            onFollow={() => handlers.onFollow(current)}
+            onNextStory={() => {
+              if (!nextStory) return;
+              analytics.track("next_story_open", {
+                content_id: nextStory.id,
+                series_id: nextStory.seriesId,
+                from_content_id: current.id,
+                from_series_id: current.seriesId,
+              });
+              // One explicit tap, never a countdown (docs/decisions.md, Prompt D).
+              const placed = placeStory(items, index, nextStory);
+              handleIndexChange(placed.index, "next_story", placed.items);
             }}
+            onClose={() => setSeriesEnded(null)}
           />
         ) : null}
+
+        <NoticePill notice={notice} durationMs={notice ? NOTICE_MS[notice.kind] : 0} />
 
         <IntentSheet
           open={intentOpen}

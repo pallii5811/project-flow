@@ -48,6 +48,18 @@ export type AnalyticsEventName =
   | "playback_error_skip"
   /** The viewer tapped Try again on a failed episode. */
   | "playback_retry"
+  /** The viewer closed the native share sheet without sharing; nothing was copied. */
+  | "share_cancel"
+  /** The clipboard refused the link; the link is shown to copy by hand. */
+  | "share_copy_failed"
+  /** Sound turned on or off: source surface (first tap on the picture), rail or key. */
+  | "sound_toggled"
+  /** The one-time "Tap for sound" cue appeared. */
+  | "sound_cue_shown"
+  /** The end of a series was shown, with the story it offered (or none). */
+  | "next_story_offered"
+  /** The viewer tapped the story offered at the end of a series. */
+  | "next_story_open"
   | "recommendation_requested"
   | "recommendation_generated"
   | "recommendation_impression"

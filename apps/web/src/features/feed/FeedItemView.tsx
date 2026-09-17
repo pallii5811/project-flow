@@ -18,6 +18,7 @@ import { ContentOverlay } from "./ContentOverlay";
 import { PlayGate } from "./PlayGate";
 import type { FailureHold } from "./feedLogic";
 import type { ProgressStore } from "./progressStore";
+import { activeCueText } from "./storyThread";
 import styles from "./feed.module.css";
 
 const videoProvider = createStaticVideoProvider();
@@ -32,7 +33,8 @@ export type FeedItemHandlers = {
   onLike: (item: ContentItem) => void;
   onFollow: (item: ContentItem) => void;
   onShare: (item: ContentItem) => void;
-  onToggleMute: () => void;
+  onToggleMute: (source: "rail" | "key") => void;
+  /** The first tap on the picture while muted turns the sound on. */
   onUnmute: () => void;
   onToggleCaptions: () => void;
   onTune: () => void;
@@ -66,7 +68,10 @@ type FeedItemViewProps = {
   active: boolean;
   preload: "none" | "metadata" | "auto";
   muted: boolean;
+  /** Captions on screen (the viewer's choice, or on while muted). */
   captionsOn: boolean;
+  /** Episodes in the series, for "Episode 3 / 60"; null when unknown. */
+  episodeCount: number | null;
   liked: boolean;
   following: boolean;
   seekToMs: number | null;
@@ -84,6 +89,7 @@ function FeedItemViewImpl({
   preload,
   muted,
   captionsOn,
+  episodeCount,
   liked,
   following,
   seekToMs,
@@ -94,6 +100,15 @@ function FeedItemViewImpl({
   handlers,
 }: FeedItemViewProps): ReactElement {
   const [playing, setPlaying] = useState(false);
+  /**
+   * A frame of this activation reached the screen. The poster stays away
+   * from then on, so a pause keeps the frozen frame (UX-03).
+   */
+  const [hasPlayed, setHasPlayed] = useState(false);
+  /** The viewer paused: a play glyph confirms it. */
+  const [viewerPaused, setViewerPaused] = useState(false);
+  /** Dialogue on screen now, as plain text; null between cues. */
+  const [cueText, setCueText] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   /** Stuck because the browser is offline; clears when playback resumes. */
   const [offline, setOffline] = useState(false);
@@ -162,14 +177,18 @@ function FeedItemViewImpl({
     handlers.onRetry(itemRef.current);
     setFailed(false);
     setPlaying(false);
+    setHasPlayed(false);
     setAttempt((count) => count + 1);
   };
 
-  // Coming back to a failed episode tries it again.
+  // Coming back to a failed episode tries it again. Every activation starts
+  // on the poster until its own first frame, and without a pause glyph.
   const wasActive = useRef(active);
   useEffect(() => {
     const becameActive = active && !wasActive.current;
     wasActive.current = active;
+    setViewerPaused(false);
+    if (!active) setHasPlayed(false);
     if (becameActive) retryIfFailed();
   }, [active]);
 
@@ -179,7 +198,7 @@ function FeedItemViewImpl({
     return () => window.removeEventListener("online", retryIfFailed);
   }, []);
 
-  const showPoster = !playing || failed || !active;
+  const showPoster = !active || failed || !(playing || hasPlayed);
   const playableUrl = resolved.ok ? resolved.playback.url : "";
   const posterUrl = resolved.ok ? resolved.playback.posterUrl : item.thumbnailUrl;
   const mountPlayer = resolved.ok && !failed && (active || preload !== "none");
@@ -198,6 +217,7 @@ function FeedItemViewImpl({
     handlers.onRetry(item);
     setOffline(false);
     setPlaying(false);
+    setHasPlayed(false);
     setFailed(false);
     setAttempt((count) => count + 1);
   };
@@ -245,7 +265,6 @@ function FeedItemViewImpl({
             muted={muted}
             seekToMs={active ? seekToMs : null}
             preload={preload}
-            captionsOn={captionsOn && item.captionsAvailable}
             captionTracks={tracks}
             events={{
               onLoadStart: () => handlers.onLoadStart(item),
@@ -254,6 +273,7 @@ function FeedItemViewImpl({
                 handlers.onTimeUpdate(item, positionMs, durationMs),
               onEnded: () => {
                 setPlaying(false);
+                setViewerPaused(false);
                 handlers.onEnded(item);
               },
               onError: (_message, mediaCode, connection) => {
@@ -267,14 +287,19 @@ function FeedItemViewImpl({
               onPlaying: (info) => {
                 // The poster leaves when a frame is on screen, not at play().
                 setPlaying(true);
+                setHasPlayed(true);
+                setViewerPaused(false);
                 setFailed(false);
                 setOffline(false);
                 handlers.onPlaying(item, info);
               },
               onPause: () => {
                 setPlaying(false);
+                // A hidden tab pauses too; only a pause the viewer can see is theirs.
+                if (active && document.visibilityState === "visible") setViewerPaused(true);
                 handlers.onPause(item);
               },
+              onCueChange: (payloads) => setCueText(activeCueText(payloads)),
               onPlayAttempt: () => handlers.onPlayAttempt(item),
               onAutoplayBlocked: handlers.onAutoplayBlocked,
               onMutedFallback: () => handlers.onMutedFallback(item),
@@ -305,9 +330,19 @@ function FeedItemViewImpl({
         seriesTitle={item.seriesTitle}
         hook={display.hook}
         episodeNumber={item.episodeNumber}
+        episodeCount={episodeCount}
+        caption={active && captionsOn && !failed ? cueText : null}
         progressStore={progressStore}
         active={active}
       />
+
+      {active && viewerPaused && hasPlayed && !playing && !failed && !showPlayGate ? (
+        <div className={styles.pausedGlyph} aria-hidden="true">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" focusable="false">
+            <path d="M8.5 5.8v12.4L19 12 8.5 5.8z" />
+          </svg>
+        </div>
+      ) : null}
 
       {active && failed ? (
         <div className={styles.mediaFail} role="status">
@@ -344,7 +379,7 @@ function FeedItemViewImpl({
           onLike={() => handlers.onLike(item)}
           onFollow={() => handlers.onFollow(item)}
           onShare={() => handlers.onShare(item)}
-          onMute={handlers.onToggleMute}
+          onMute={() => handlers.onToggleMute("rail")}
           onCaptions={handlers.onToggleCaptions}
           onTune={handlers.onTune}
         />

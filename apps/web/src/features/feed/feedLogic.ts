@@ -6,6 +6,8 @@ export type ShareUrlOptions = {
   utmMedium?: string;
   utmCampaign?: string;
   shareId?: string;
+  /** Whole seconds the link opens at (`t`), from shareStartSeconds; omitted when null. */
+  startSeconds?: number | null;
 };
 
 /** Absolute share URL with attribution query params. */
@@ -26,6 +28,9 @@ export function buildShareUrl(
   }
   if (options.shareId) {
     url.searchParams.set("share_id", options.shareId);
+  }
+  if (options.startSeconds != null && options.startSeconds > 0) {
+    url.searchParams.set("t", String(Math.floor(options.startSeconds)));
   }
   return url.toString();
 }

@@ -174,6 +174,18 @@
   animation: overlayEnter 280ms var(--flow-ease-out, ease-out) both;
 }
 
+/*
+ * The Continue strip covers the title block: captions move above the strip
+ * instead of being clipped by it, and the covered text steps aside.
+ */
+.overlayCovered {
+  padding-bottom: calc(222px + env(safe-area-inset-bottom));
+}
+
+.overlayCovered > :not([data-caption]) {
+  visibility: hidden;
+}
+
 .overlayInactive {
   opacity: 0.55;
   animation: none;
@@ -215,15 +227,102 @@
   text-shadow: 0 1px 18px rgba(0, 0, 0, 0.6);
 }
 
-.episodeLabel {
-  margin: 4px 0 0;
+/* Where the viewer is in the story, read before the title (UX-07). */
+.episodeKicker {
+  margin: 0 0 -2px;
   font-family: var(--font-body), sans-serif;
-  font-size: 10px;
-  line-height: 14px;
+  font-size: 12px;
+  line-height: 16px;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--flow-muted, rgba(247, 245, 242, 0.4));
+  font-variant-numeric: tabular-nums;
+  color: rgba(247, 245, 242, 0.8);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.7);
+}
+
+/*
+ * Captions drawn by the app (A11Y-01, decision 3), in the overlay column right
+ * above the title block. Each line carries its own backdrop, so the text keeps
+ * at least 4.5:1 over a white frame (storyThread.test.ts reads these values).
+ */
+.caption {
+  margin: 0 0 12px;
+  font-family: var(--font-body), sans-serif;
+  font-size: 18px;
+  line-height: 1.5;
+  text-wrap: balance;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  max-width: 30ch;
+  animation: captionIn 120ms var(--flow-ease-out, ease-out) both;
+}
+
+.captionRow {
+  display: block;
+}
+
+.captionLine {
+  color: #faf8f4;
+  background: rgba(8, 8, 10, 0.72);
+  padding: 3px 9px 4px;
+  border-radius: 7px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+@keyframes captionIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* A pause keeps the frame; the glyph confirms the tap registered (UX-03). */
+.pausedGlyph {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 4;
+  width: 72px;
+  height: 72px;
+  margin: -36px 0 0 -36px;
+  display: grid;
+  place-items: center;
+  padding-left: 4px;
+  border-radius: 999px;
+  color: #faf8f4;
+  background: rgba(8, 8, 10, 0.42);
+  border: 1.5px solid rgba(247, 245, 242, 0.5);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+  animation: glyphIn 160ms var(--flow-ease-out, ease-out) both;
+}
+
+@keyframes glyphIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .progressEdge {
@@ -310,23 +409,6 @@
   opacity: 1;
 }
 
-/* When muted, pulse unmute affordance — speed to first meaningful audio */
-.railButtonMute[aria-pressed="true"] {
-  animation: mutePulse 1.8s var(--flow-ease-soft, ease) infinite;
-}
-
-@keyframes mutePulse {
-  0%,
-  100% {
-    color: rgba(247, 245, 242, 0.88);
-    transform: scale(1);
-  }
-  50% {
-    color: var(--flow-accent, #e8dcc8);
-    transform: scale(1.06);
-  }
-}
-
 .railIcon {
   width: 22px;
   height: 22px;
@@ -336,15 +418,6 @@
 .railIconFilled {
   fill: currentColor;
   stroke: currentColor;
-}
-
-.media :global(video)::cue {
-  background: rgba(0, 0, 0, 0.58);
-  color: #faf8f4;
-  font-family: var(--font-body), sans-serif;
-  font-size: 15px;
-  line-height: 1.4;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.85);
 }
 
 .playGate {
@@ -531,8 +604,7 @@
   outline-offset: 2px;
 }
 
-.strip,
-.seriesEnd {
+.strip {
   position: absolute;
   left: 14px;
   right: 14px;
@@ -550,19 +622,17 @@
   animation: sheetUp 200ms var(--flow-ease-out, ease-out) both;
 }
 
-.stripLabel,
-.seriesEndLabel {
+.stripLabel {
   margin: 0;
   font-family: var(--font-body), sans-serif;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #a8a69f;
+  color: #b3b0a8;
 }
 
-.stripTitle,
-.seriesEndTitle {
+.stripTitle {
   margin: 0;
   font-family: var(--font-display), sans-serif;
   font-size: 18px;
@@ -571,16 +641,15 @@
   letter-spacing: -0.02em;
 }
 
-.stripMeta,
-.seriesEndMeta {
+.stripMeta {
   margin: 0;
   font-family: var(--font-body), sans-serif;
   font-size: 13px;
-  color: #a8a69f;
+  color: #b3b0a8;
+  font-variant-numeric: tabular-nums;
 }
 
-.stripButton,
-.seriesEndButton {
+.stripButton {
   align-self: flex-start;
   margin-top: 6px;
   border: none;
@@ -591,25 +660,337 @@
   font-family: var(--font-body), sans-serif;
   font-size: 15px;
   font-weight: 600;
+  background: var(--flow-accent, #e8dcc8);
+  color: #141210;
   transition:
     opacity var(--flow-fast, 120ms) ease,
     transform var(--flow-fast, 120ms) ease;
 }
 
-.stripButton:active,
-.seriesEndButton:active {
+.stripButton:active {
   opacity: 0.88;
   transform: scale(0.98);
 }
 
-.stripButton {
+/* ---------- Notices: one slot at the top of the frame ---------- */
+
+.noticeLive {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.notice,
+.upNext {
+  position: absolute;
+  top: calc(18px + env(safe-area-inset-top));
+  left: 50%;
+  z-index: 25;
+  max-width: calc(100% - 48px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 16px 9px 13px;
+  border-radius: 999px;
+  background: rgba(14, 14, 16, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(14px) saturate(1.1);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  color: #f7f5f2;
+  font-family: var(--font-body), sans-serif;
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  pointer-events: none;
+  animation:
+    noticeIn 240ms var(--flow-ease-out, ease-out) both,
+    noticeOut 360ms var(--flow-ease-soft, ease) forwards;
+  animation-delay: 0ms, calc(var(--notice-ms, 1800ms) - 360ms);
+}
+
+.noticeWithDetail {
+  border-radius: 16px;
+  padding: 10px 16px;
+  white-space: normal;
+  pointer-events: auto;
+}
+
+.noticeRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.noticeGlyph {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--flow-accent, #e8dcc8);
+}
+
+.noticeDetail {
+  max-width: 100%;
+  font-size: 12px;
+  line-height: 16px;
+  color: rgba(247, 245, 242, 0.72);
+  overflow-wrap: anywhere;
+  text-align: center;
+  user-select: all;
+  -webkit-user-select: all;
+}
+
+.upNext {
+  flex-direction: row;
+  gap: 8px;
+  padding: 9px 16px;
+  --notice-ms: 4000ms;
+}
+
+.upNextKicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--flow-accent, #e8dcc8);
+}
+
+.upNextText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes noticeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes noticeOut {
+  to {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
+}
+
+/* ---------- The end of a series: a handoff, not a dead end ---------- */
+
+.seriesEnd {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 22px;
+  padding: 24px 20px calc(28px + env(safe-area-inset-bottom));
+  color: #f4f3f1;
+  /* Opaque where the title, hook and rail sit, so nothing ghosts through. */
+  background: linear-gradient(
+    to top,
+    #060607 0%,
+    #060607 58%,
+    rgba(6, 6, 7, 0.86) 72%,
+    rgba(6, 6, 7, 0.55) 100%
+  );
+  animation: gateFade 320ms var(--flow-ease-out, ease-out) both;
+}
+
+.seriesEndClose {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top));
+  right: 8px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(247, 245, 242, 0.82);
+  cursor: pointer;
+}
+
+.seriesEndClose:focus-visible,
+.seriesEndAction:focus-visible,
+.nextStory:focus-visible {
+  outline: 2px solid var(--flow-accent, #e8dcc8);
+  outline-offset: 2px;
+}
+
+.seriesEndBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: sheetUp 360ms var(--flow-ease-out, ease-out) 60ms both;
+}
+
+.seriesEndLabel {
+  margin: 0;
+  font-family: var(--font-body), sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--flow-accent, #e8dcc8);
+}
+
+.seriesEndTitle {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(28px, 7.4vw, 34px);
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: #faf8f4;
+}
+
+.seriesEndMeta {
+  margin: 0;
+  max-width: 32ch;
+  font-family: var(--font-body), sans-serif;
+  font-size: 15px;
+  line-height: 22px;
+  color: rgba(247, 245, 242, 0.74);
+  font-variant-numeric: tabular-nums;
+}
+
+.seriesEndActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.seriesEndAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px 0 14px;
+  border: 1px solid rgba(247, 245, 242, 0.18);
+  border-radius: 999px;
+  background: rgba(247, 245, 242, 0.06);
+  color: #f4f3f1;
+  font-family: var(--font-body), sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--flow-fast, 120ms) ease,
+    border-color var(--flow-fast, 120ms) ease,
+    transform var(--flow-fast, 120ms) ease;
+}
+
+.seriesEndAction:active,
+.nextStory:active {
+  transform: scale(0.98);
+}
+
+.seriesEndAction[aria-pressed="true"] {
+  border-color: rgba(232, 220, 200, 0.55);
+  color: var(--flow-accent, #e8dcc8);
+}
+
+.nextStory {
+  display: grid;
+  grid-template-columns: 64px 1fr 44px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 10px 14px 10px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(247, 245, 242, 0.07);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  animation: sheetUp 360ms var(--flow-ease-out, ease-out) 140ms both;
+  transition: transform var(--flow-fast, 120ms) ease;
+}
+
+.nextStoryPoster {
+  width: 64px;
+  height: 96px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #141416;
+}
+
+.nextStoryText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.nextStoryLabel {
+  font-family: var(--font-body), sans-serif;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(247, 245, 242, 0.66);
+}
+
+.nextStoryTitle {
+  font-family: var(--font-display), sans-serif;
+  font-size: 18px;
+  line-height: 23px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #faf8f4;
+}
+
+.nextStoryHook {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-family: var(--font-body), sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  color: rgba(247, 245, 242, 0.78);
+}
+
+.nextStoryMeta {
+  font-family: var(--font-body), sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  color: rgba(247, 245, 242, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+.nextStoryPlay {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding-left: 3px;
+  border-radius: 999px;
   background: var(--flow-accent, #e8dcc8);
   color: #141210;
 }
 
-.seriesEndButton {
-  background: #26262a;
-  color: #f4f3f1;
+.seriesEndCatalog {
+  margin: 0;
+  font-family: var(--font-body), sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  color: rgba(247, 245, 242, 0.6);
 }
 
 .empty {
@@ -631,8 +1012,18 @@
   .sheetBackdrop,
   .strip,
   .seriesEnd,
-  .railButtonMute[aria-pressed="true"] {
+  .seriesEndBody,
+  .nextStory,
+  .caption,
+  .pausedGlyph {
     animation: none !important;
+  }
+
+  /* Notices still leave on time, without moving. */
+  .notice,
+  .upNext {
+    animation: noticeOut 1ms linear forwards !important;
+    animation-delay: calc(var(--notice-ms, 1800ms) - 1ms) !important;
   }
 
   .poster {
