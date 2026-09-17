@@ -4,6 +4,35 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-17 — The first seconds: captions drawn by the app, one sound cue, a series end that hands off
+
+**Decision:** The browser no longer draws captions. Every text track stays `hidden` and the app renders the active cue as plain text in the overlay column, right above the episode position and the title, on a per-line backdrop (`#faf8f4` on `rgba(8, 8, 10, 0.72)`, 18 px). Captions follow the sound until the viewer chooses: on while muted, off with sound. A tap on the captions button is an explicit choice that wins from then on and is remembered on the device (`project-flow.captions.v1`); a resume point saved with captions on migrates as "on". While the Continue strip covers the title block, the title hides and the captions move above the strip.
+
+The first muted episode that reaches a frame shows one "Tap for sound" pill at the top of the frame, once per browser session. It leaves after 4 s, at the first touch or key, and never shows to a viewer who already turned the sound on. The mute button no longer pulses.
+
+Other decisions, all pure in `apps/web/src/features/feed/storyThread.ts`:
+
+- The episode position reads "Episode 3 / 5" above the title, 12 px at 80% opacity; the total is dropped when unknown or contradictory.
+- A pause the viewer can see shows a play glyph; playing again removes it.
+- Share: a copied link says "Link copied" (1.8 s) in a status region; a refused clipboard says so and shows the link on one selectable line (6 s); closing the native share sheet copies nothing and sends `share_cancel`. The rail share carries the moment (`t`, 3 s before the position, only past 5 s and not in the last 2 s); a landing with `t` seeks there before the first frame and offers no resume. `share_open` carries `source` (rail, series_end) and `start_seconds`.
+- The end of a series: "Series complete" (or "More episodes soon"), share (the story from episode 1, `utm_campaign=series_end`), follow, and the next story: the next other series in the viewer's feed, from its first episode, with poster and hook. It starts only on a tap: no countdown (Prompt D). When the catalog has no other series the card says so. `next_story_offered` and `next_story_open` measure the handoff.
+- A returning viewer who finished an episode sees a "Next episode" label that fades after 4 s. It has no button: the episode is already playing (B2-UPNEXT).
+- New events: `sound_toggled` (source surface, rail, key), `sound_cue_shown`, `share_cancel`, `share_copy_failed`, `next_story_offered`, `next_story_open`; `caption_toggled` carries `muted`.
+
+**Why:** Measured on master (ad27a70) with phone screenshots at 375×812: a cold open played muted with no captions, and captions turned on were drawn by the browser at the bottom of the video, under the 92% scrim and under the hook, barely visible. Nothing said the first tap turns the sound on; the mute icon pulsed forever. Share by clipboard gave no feedback, and a closed share sheet overwrote the clipboard. The series end said "Episode complete" over "You finished this story" and offered only "Keep watching". "Up next" had a Continue button that only hid the strip.
+
+**Consequences:**
+
+- The caption backdrop keeps 8.0:1 over a pure white frame; `storyThread.test.ts` reads the shipped CSS and fails under 4.5:1 (sabotage run: alpha 0.3 → 1.93:1, red).
+- First-load JavaScript 130 → 134 kB.
+- The "previously on" recap (OPP-04) is not built: the catalog has a teaser hook per episode, not a summary of what happened, and a teaser shown as a recap would say something the story did not.
+- The countdown into another series proposed by the audit (OPP-03, UX-06) is not built: Prompt D and the owner's decisions forbid autoplay into another series.
+- A pause never showed the poster, as the audit feared (UX-03): the video element sits above it (z-index 1 over 0) and keeps its frame, as the master screenshot shows. Only the missing pause feedback was real.
+
+**Revisit:** When series manifests carry recaps; when beta data gives `next_story_open / next_story_offered` and share landings with `t`; when real phones show whether the sound cue at the top is seen.
+
+---
+
 ## 2026-09-17 — Playback never ends on a poster; resume per series; metrics on the first frame
 
 **Decision:** Every activation of an episode ends playing, at the tap-to-play gate, or in a visible error followed by a move. The player (`apps/web/src/features/player`, decisions pure in `playbackRecovery.ts`):

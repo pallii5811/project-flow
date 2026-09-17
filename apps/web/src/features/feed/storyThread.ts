@@ -84,7 +84,10 @@ export function cuePlainText(payload: string): string {
 
 /** Joins the cues active at once (overlapping speakers), in cue order. */
 export function activeCueText(payloads: readonly string[]): string | null {
-  const text = payloads.map(cuePlainText).filter((entry) => entry.length > 0).join("\n");
+  const text = payloads
+    .map(cuePlainText)
+    .filter((entry) => entry.length > 0)
+    .join("\n");
   return text.length > 0 ? text : null;
 }
 
@@ -101,23 +104,23 @@ export function contrastRatio(
   a: readonly [number, number, number],
   b: readonly [number, number, number],
 ): number {
-  const [light, dark] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x) as [
-    number,
-    number,
-  ];
+  const [light, dark] = [relativeLuminance(a), relativeLuminance(b)].sort(
+    (x, y) => y - x,
+  ) as [number, number];
   return (light + 0.05) / (dark + 0.05);
 }
 
 /**
- * Worst case for light text on a black backdrop of `alpha`: the video behind
- * it is pure white, so the backdrop is at its brightest.
+ * Worst case for light text on a translucent dark backdrop: the video behind
+ * it is pure white, so the composited backdrop is at its brightest.
  */
 export function worstCaseCaptionContrast(
   text: readonly [number, number, number],
+  backdrop: readonly [number, number, number],
   backdropAlpha: number,
 ): number {
-  const level = Math.round(255 * (1 - backdropAlpha));
-  return contrastRatio(text, [level, level, level]);
+  const over = (channel: number) => channel * backdropAlpha + 255 * (1 - backdropAlpha);
+  return contrastRatio(text, [over(backdrop[0]), over(backdrop[1]), over(backdrop[2])]);
 }
 
 /* ---------- The sound cue ---------- */
@@ -150,7 +153,11 @@ export const SHARE_END_MARGIN_MS = 2_000;
 /** The `t` (whole seconds) a share carries, or null to open at the start. */
 export function shareStartSeconds(positionMs: number, durationMs: number): number | null {
   if (!Number.isFinite(positionMs) || positionMs < SHARE_MIN_POSITION_MS) return null;
-  if (Number.isFinite(durationMs) && durationMs > 0 && positionMs > durationMs - SHARE_END_MARGIN_MS) {
+  if (
+    Number.isFinite(durationMs) &&
+    durationMs > 0 &&
+    positionMs > durationMs - SHARE_END_MARGIN_MS
+  ) {
     return null;
   }
   return Math.floor((positionMs - SHARE_PREROLL_MS) / 1_000);
@@ -200,9 +207,12 @@ export function pickNextStory(
   const current = items[index];
   if (!current) return null;
   const firstEpisodeOf = (seriesId: string): ContentItem | null =>
-    ordered.find((item) => item.seriesId === seriesId && item.episodeNumber === 1) ?? null;
+    ordered.find((item) => item.seriesId === seriesId && item.episodeNumber === 1) ??
+    null;
 
-  const listed = items.slice(index + 1).find((item) => item.seriesId !== current.seriesId);
+  const listed = items
+    .slice(index + 1)
+    .find((item) => item.seriesId !== current.seriesId);
   if (listed) return firstEpisodeOf(listed.seriesId) ?? listed;
   const fromCatalog = ordered.find((item) => item.seriesId !== current.seriesId);
   if (!fromCatalog) return null;
@@ -234,6 +244,8 @@ export function storyShareTarget(
   ordered: readonly ContentItem[],
 ): ContentItem {
   return (
-    ordered.find((entry) => entry.seriesId === item.seriesId && entry.episodeNumber === 1) ?? item
+    ordered.find(
+      (entry) => entry.seriesId === item.seriesId && entry.episodeNumber === 1,
+    ) ?? item
   );
 }

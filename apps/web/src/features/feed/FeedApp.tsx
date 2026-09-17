@@ -156,7 +156,9 @@ const UP_NEXT_LABEL_MS = 4_000;
 
 function readStored(storage: "local" | "session", key: string): string | null {
   try {
-    return (storage === "local" ? window.localStorage : window.sessionStorage).getItem(key);
+    return (storage === "local" ? window.localStorage : window.sessionStorage).getItem(
+      key,
+    );
   } catch {
     return null;
   }
@@ -164,7 +166,10 @@ function readStored(storage: "local" | "session", key: string): string | null {
 
 function writeStored(storage: "local" | "session", key: string, value: string): void {
   try {
-    (storage === "local" ? window.localStorage : window.sessionStorage).setItem(key, value);
+    (storage === "local" ? window.localStorage : window.sessionStorage).setItem(
+      key,
+      value,
+    );
   } catch {
     // private mode or blocked storage: the choice lasts for this page only
   }
@@ -179,7 +184,9 @@ type PendingTransition = {
 };
 
 function episodeCountOf(catalog: FeedCatalog, item: ContentItem): number | null {
-  return catalog.series.find((series) => series.id === item.seriesId)?.totalEpisodes ?? null;
+  return (
+    catalog.series.find((series) => series.id === item.seriesId)?.totalEpisodes ?? null
+  );
 }
 
 function hashSeed(input: string): number {
@@ -303,9 +310,10 @@ export function FeedApp({
 
   // Services follow the catalog the feed knows. Cached per catalog so a click
   // right after the catalog arrives never uses the two-item one.
-  const recommendationCache = useRef<{ data: FeedData; service: RecommendationService } | null>(
-    null,
-  );
+  const recommendationCache = useRef<{
+    data: FeedData;
+    service: RecommendationService;
+  } | null>(null);
   const recommendationFor = useCallback(
     (data: FeedData): RecommendationService => {
       if (recommendationCache.current?.data !== data) {
@@ -328,7 +336,9 @@ export function FeedApp({
     [analytics, flags, sessionId],
   );
 
-  const intentCache = useRef<{ data: FeedData; service: CatalogIntentService } | null>(null);
+  const intentCache = useRef<{ data: FeedData; service: CatalogIntentService } | null>(
+    null,
+  );
   const intentFor = useCallback(
     (data: FeedData): CatalogIntentService => {
       if (intentCache.current?.data !== data) {
@@ -470,7 +480,9 @@ export function FeedApp({
     const item = feedRef.current.ordered.find((entry) => entry.id === initialContentId);
     // A shared moment opens where it was shared (OPP-02). The first play stays
     // an autoplay: the seek is applied before the first frame.
-    const startMs = item ? parseShareStartMs(window.location.search, item.durationMs) : null;
+    const startMs = item
+      ? parseShareStartMs(window.location.search, item.durationMs)
+      : null;
     if (startMs !== null) {
       shareStartMs.current = startMs;
       setSeekToMs(startMs);
@@ -522,7 +534,9 @@ export function FeedApp({
       if (initialContentId) {
         // A shared link resumes only its own series, and never touches the
         // resume points of the others (VIR-2).
-        const target = feedRef.current.ordered.find((item) => item.id === initialContentId);
+        const target = feedRef.current.ordered.find(
+          (item) => item.id === initialContentId,
+        );
         if (!target) return;
         const saved = await resumeStore.loadForSeries(target.seriesId);
         if (cancelled || !saved) return;
@@ -532,7 +546,11 @@ export function FeedApp({
         if (shareStartMs.current !== null) return;
         if (saved.contentId === initialContentId && isResumable(saved)) {
           // No move and no seek yet: the first play stays an autoplay (MP-2).
-          setResumeOffer({ contentId: saved.contentId, positionMs: saved.positionMs, reason: "resume" });
+          setResumeOffer({
+            contentId: saved.contentId,
+            positionMs: saved.positionMs,
+            reason: "resume",
+          });
           patchLaunchDiagnostics({ resumePositionMs: saved.positionMs });
         }
         return;
@@ -847,7 +865,13 @@ export function FeedApp({
     }
     // Last listed slide: the error stays up while the page is built, and the
     // skip happens as soon as a slide exists after it.
-    if (feedExhausted(feedRef.current.complete, feedRef.current.ordered.length, items.length)) {
+    if (
+      feedExhausted(
+        feedRef.current.complete,
+        feedRef.current.ordered.length,
+        items.length,
+      )
+    ) {
       pendingSkipRef.current = null;
       setPlaybackFailure({ ...failure, hold: "end" });
       return;
@@ -856,11 +880,18 @@ export function FeedApp({
     void ensureFeedPage();
   };
   useEffect(() => {
-    if (!playbackFailure || playbackFailure.hold || current?.id !== playbackFailure.contentId) {
+    if (
+      !playbackFailure ||
+      playbackFailure.hold ||
+      current?.id !== playbackFailure.contentId
+    ) {
       return;
     }
     const failure = playbackFailure;
-    const timer = window.setTimeout(() => skipFailedRef.current(failure), ERROR_SKIP_DELAY_MS);
+    const timer = window.setTimeout(
+      () => skipFailedRef.current(failure),
+      ERROR_SKIP_DELAY_MS,
+    );
     return () => window.clearTimeout(timer);
   }, [current?.id, playbackFailure]);
   // A skip that waited at the last slide runs once the page has grown, or
@@ -882,7 +913,11 @@ export function FeedApp({
     if (index < items.length - 1 || pageReady) skipFailedRef.current(playbackFailure);
   }, [current?.id, feed.complete, index, items.length, pageReady, playbackFailure]);
 
-  const handleTimeUpdate = (item: ContentItem, positionMs: number, durationMs: number) => {
+  const handleTimeUpdate = (
+    item: ContentItem,
+    positionMs: number,
+    durationMs: number,
+  ) => {
     progressStore.set(item.id, durationMs > 0 ? positionMs / durationMs : 0);
     patchLaunchDiagnostics({
       currentTimeMs: positionMs,
@@ -937,14 +972,20 @@ export function FeedApp({
     });
 
     void (async () => {
-      let placed = placeNextInSeries(feedRef.current.source, itemsRef.current, indexRef.current);
+      let placed = placeNextInSeries(
+        feedRef.current.source,
+        itemsRef.current,
+        indexRef.current,
+      );
       if (placed.kind === "series_complete" && !feedRef.current.complete) {
         // The first-frame catalog may not know the next episode yet.
         const data = await loadCatalog();
-        if (data) placed = placeNextInSeries(data.source, itemsRef.current, indexRef.current);
+        if (data)
+          placed = placeNextInSeries(data.source, itemsRef.current, indexRef.current);
       }
       // The viewer moved on meanwhile: nothing to continue.
-      if (!mountedRef.current || itemsRef.current[indexRef.current]?.id !== item.id) return;
+      if (!mountedRef.current || itemsRef.current[indexRef.current]?.id !== item.id)
+        return;
 
       if (placed.kind === "next_in_series") {
         const continueKey = `${item.id}->${placed.next.id}`;
@@ -1007,7 +1048,10 @@ export function FeedApp({
         source === "series_end" ? storyShareTarget(item, feedRef.current.ordered) : item;
       const startSeconds =
         source === "rail"
-          ? shareStartSeconds(progressStore.get(item.id) * item.durationMs, item.durationMs)
+          ? shareStartSeconds(
+              progressStore.get(item.id) * item.durationMs,
+              item.durationMs,
+            )
           : null;
       const url = buildShareUrl(feedRef.current.catalog, target, origin, {
         utmSource: "share",
@@ -1057,7 +1101,10 @@ export function FeedApp({
         });
         showNotice({ kind: "share_copied", text: "Link copied" });
       } catch {
-        analytics.track("share_copy_failed", { content_id: target.id, share_id: shareId });
+        analytics.track("share_copy_failed", {
+          content_id: target.id,
+          share_id: shareId,
+        });
         showNotice({ kind: "share_failed", text: "Couldn’t copy the link", detail: url });
       }
     },
@@ -1103,6 +1150,11 @@ export function FeedApp({
     mutedRef.current = nextMuted;
     setMuted(nextMuted);
     setNotice((shown) => (shown?.kind === "sound" ? null : shown));
+    // A viewer who found the sound needs no cue later, even muted again.
+    if (!nextMuted && !soundCueShown.current) {
+      soundCueShown.current = true;
+      writeStored("session", SOUND_CUE_SESSION_KEY, "1");
+    }
     analytics.track("sound_toggled", {
       content_id: current?.id ?? null,
       muted: nextMuted,
@@ -1454,7 +1506,8 @@ export function FeedApp({
         info.firstFrame && transition?.toContentId === item.id
           ? Math.round(performance.now() - transition.startedAt)
           : null;
-      if (info.firstFrame && transition?.toContentId === item.id) transitionRef.current = null;
+      if (info.firstFrame && transition?.toContentId === item.id)
+        transitionRef.current = null;
       analytics.track("play", {
         content_id: item.id,
         series_id: item.seriesId,
@@ -1521,6 +1574,11 @@ export function FeedApp({
           muted={muted}
           captionsOn={captionsOn}
           episodeCounts={episodeCounts}
+          coveredContentId={
+            resumeOffer && resumeOffer.reason !== "next_episode"
+              ? resumeOffer.contentId
+              : null
+          }
           likedIds={likedIds}
           followingIds={followingIds}
           seekToMs={seekToMs}
@@ -1536,11 +1594,18 @@ export function FeedApp({
           handlers={handlers}
         />
 
-        {resumeOffer && current?.id === resumeOffer.contentId && resumeOffer.reason === "next_episode" ? (
-          <UpNextLabel seriesTitle={current.seriesTitle} episodeLabel={positionOf(current)} />
+        {resumeOffer &&
+        current?.id === resumeOffer.contentId &&
+        resumeOffer.reason === "next_episode" ? (
+          <UpNextLabel
+            seriesTitle={current.seriesTitle}
+            episodeLabel={positionOf(current)}
+          />
         ) : null}
 
-        {resumeOffer && current?.id === resumeOffer.contentId && resumeOffer.reason !== "next_episode" ? (
+        {resumeOffer &&
+        current?.id === resumeOffer.contentId &&
+        resumeOffer.reason !== "next_episode" ? (
           <ContinueStrip
             seriesTitle={current.seriesTitle}
             episodeLabel={positionOf(current)}
@@ -1578,7 +1643,8 @@ export function FeedApp({
                     contentId: nextStory.id,
                     seriesTitle: nextStory.seriesTitle,
                     hook: nextStory.hook.replace(/\n/g, " "),
-                    posterUrl: nextStory.playback.posterReference || nextStory.thumbnailUrl,
+                    posterUrl:
+                      nextStory.playback.posterReference || nextStory.thumbnailUrl,
                     position: positionOf(nextStory),
                   }
                 : null

@@ -1,15 +1,13 @@
 "use client";
 
 import { shouldRenderSlide, type ContentItem } from "@project-flow/feed-domain";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  type ReactElement,
-  type RefObject,
-} from "react";
+import { useCallback, useEffect, useRef, type ReactElement, type RefObject } from "react";
 
-import { FeedItemView, FeedSlidePlaceholder, type FeedItemHandlers } from "./FeedItemView";
+import {
+  FeedItemView,
+  FeedSlidePlaceholder,
+  type FeedItemHandlers,
+} from "./FeedItemView";
 import { isAtSlide, settledIndex, type FailureHold } from "./feedLogic";
 import type { ProgressStore } from "./progressStore";
 import styles from "./feed.module.css";
@@ -30,6 +28,8 @@ type FeedScrollerProps = {
   captionsOn: boolean;
   /** Episodes per series, from the catalog the feed knows. */
   episodeCounts: ReadonlyMap<string, number>;
+  /** The Continue strip lies over this episode's title block. */
+  coveredContentId?: string | null;
   likedIds: Set<string>;
   followingIds: Set<string>;
   seekToMs: number | null;
@@ -51,6 +51,7 @@ export function FeedScroller({
   muted,
   captionsOn,
   episodeCounts,
+  coveredContentId = null,
   likedIds,
   followingIds,
   seekToMs,
@@ -164,11 +165,8 @@ export function FeedScroller({
         const inWindow = prefetchIds.has(item.id);
         // Next episode: full preload for zero-gap swipe; neighbors: metadata only.
         const isNext = itemIndex === index + 1;
-        const preload: "none" | "metadata" | "auto" = active || isNext
-          ? "auto"
-          : inWindow
-            ? "metadata"
-            : "none";
+        const preload: "none" | "metadata" | "auto" =
+          active || isNext ? "auto" : inWindow ? "metadata" : "none";
         return (
           <FeedItemView
             key={item.id}
@@ -178,6 +176,7 @@ export function FeedScroller({
             muted={muted}
             captionsOn={captionsOn && item.captionsAvailable}
             episodeCount={episodeCounts.get(item.seriesId) ?? null}
+            overlayCovered={active && coveredContentId === item.id}
             liked={likedIds.has(item.id)}
             following={followingIds.has(item.seriesId)}
             seekToMs={active ? seekToMs : null}

@@ -179,11 +179,12 @@
  * instead of being clipped by it, and the covered text steps aside.
  */
 .overlayCovered {
-  padding-bottom: calc(222px + env(safe-area-inset-bottom));
+  padding-bottom: calc(214px + env(safe-area-inset-bottom));
 }
 
+/* The strip already names the series and the episode: nothing peeks out under it. */
 .overlayCovered > :not([data-caption]) {
-  visibility: hidden;
+  display: none;
 }
 
 .overlayInactive {
@@ -716,7 +717,8 @@
 
 .noticeWithDetail {
   border-radius: 16px;
-  padding: 10px 16px;
+  padding: 10px 12px;
+  gap: 8px;
   white-space: normal;
   pointer-events: auto;
 }
@@ -734,13 +736,21 @@
   color: var(--flow-accent, #e8dcc8);
 }
 
+/* One line, selected whole by a long press: the full link is copied even where it is cut. */
 .noticeDetail {
-  max-width: 100%;
-  font-size: 12px;
-  line-height: 16px;
-  color: rgba(247, 245, 242, 0.72);
-  overflow-wrap: anywhere;
-  text-align: center;
+  display: block;
+  box-sizing: border-box;
+  width: min(280px, calc(100vw - 80px));
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(247, 245, 242, 0.08);
+  font-size: 13px;
+  line-height: 18px;
+  color: rgba(247, 245, 242, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
   user-select: all;
   -webkit-user-select: all;
 }

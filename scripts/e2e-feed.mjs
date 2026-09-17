@@ -1,4 +1,4 @@
-/* global window, document, performance, DOMException, HTMLMediaElement, HTMLVideoElement, KeyboardEvent */
+/* global window, document, performance, DOMException, HTMLMediaElement, HTMLVideoElement, KeyboardEvent, Navigator, getComputedStyle */
 /**
  * Real-browser check of the consumer path on the static export
  * (docs/standard.md §4, "a real browser run of open → play → swipe").
@@ -31,11 +31,23 @@
  *      plays it (or shows the error and skips);
  *  13. an episode that cannot load shows the error, then skips on its own;
  *  14. an episode glimpsed for a second is not where a returning viewer lands;
- *  15. leaving an auto-continued episode in its first second reopens on it (Up next);
+ *  15. leaving an auto-continued episode in its first second reopens on it (Next episode);
  *  16. a playlist that answers 503 four times plays after the player's 1 s and 3 s retries;
  *  17. sound refused without a gesture: the next episode plays muted and says so;
  *  18. a network that is online but carries nothing: two error skips, then the
  *      feed stops on "Connection problem" instead of running through the feed.
+ *
+ * The first seconds and the thread of the story (docs/decisions.md, batch 3a):
+ *  19. muted cold open: captions drawn by the app above the title block, no
+ *      native cues, one "Tap for sound" cue that the first tap removes for good;
+ *  20. captions turned off by the viewer stay off while muted, after a reload;
+ *  21. a copied link says "Link copied" in a status region; closing the share
+ *      sheet copies nothing;
+ *  22. a link shared at a moment opens at that moment;
+ *  23. a pause shows a play glyph, playing again removes it;
+ *  24. the end of a series offers share and follow and starts nothing by itself;
+ *      with --scale, tapping the next story plays another series from episode 1.
+ * Checks 11 and 15 expect a "Next episode" label without a button (B2-UPNEXT).
  */
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
@@ -118,7 +130,8 @@ function trackPage(page, label, consoleErrors, mediaRequests, posterRequests = [
   page.on("pageerror", (error) => consoleErrors.push(`${label}: ${error.message}`));
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.pathname.includes("/posters/")) posterRequests.push(url.pathname + url.search);
+    if (url.pathname.includes("/posters/"))
+      posterRequests.push(url.pathname + url.search);
   });
   page.on("requestfinished", async (request) => {
     const { pathname } = new URL(request.url());
@@ -148,7 +161,10 @@ function collectAnalytics(page) {
     const text = message.text();
     if (!text.startsWith("[analytics] ")) return;
     const name = text.slice("[analytics] ".length).split(" ")[0];
-    const envelope = await message.args()[1]?.jsonValue().catch(() => null);
+    const envelope = await message
+      .args()[1]
+      ?.jsonValue()
+      .catch(() => null);
     events.push({ name, properties: envelope?.properties ?? null });
   });
   return events;
@@ -174,9 +190,9 @@ function feedShape() {
   return {
     listed: slides.length,
     withMedia: slides.filter((slide) => slide.querySelector("img, video")).length,
-    active: document
-      .querySelector('[data-active="true"]')
-      ?.getAttribute("data-content-id") ?? null,
+    active:
+      document.querySelector('[data-active="true"]')?.getAttribute("data-content-id") ??
+      null,
   };
 }
 
@@ -214,7 +230,10 @@ function installPhoneAutoplayRule() {
       true,
     );
   }
-  const mutedProperty = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "muted");
+  const mutedProperty = Object.getOwnPropertyDescriptor(
+    HTMLMediaElement.prototype,
+    "muted",
+  );
   Object.defineProperty(HTMLMediaElement.prototype, "muted", {
     configurable: true,
     enumerable: mutedProperty.enumerable,
@@ -321,10 +340,14 @@ async function measureThrottled(browser, runs = 3) {
   return { runs: results, medianFirstPlayingMs: sorted[Math.floor(sorted.length / 2)] };
 }
 
-const server = spawn(process.execPath, ["scripts/serve-static.mjs", EXPORT_DIR, String(PORT)], {
-  cwd: repoRoot,
-  stdio: "ignore",
-});
+const server = spawn(
+  process.execPath,
+  ["scripts/serve-static.mjs", EXPORT_DIR, String(PORT)],
+  {
+    cwd: repoRoot,
+    stdio: "ignore",
+  },
+);
 
 let browser;
 try {
@@ -442,17 +465,23 @@ try {
     const scrolled = await feed
       .waitForFunction(
         () =>
-          document.querySelector('[data-active="true"]')?.getAttribute("data-content-id") ===
-          "item_signal_3",
+          document
+            .querySelector('[data-active="true"]')
+            ?.getAttribute("data-content-id") === "item_signal_3",
         null,
         { timeout: 5_000 },
       )
       .then(() => true)
       .catch(() => false);
     measured.scrollGestureMovedTo = await feed.evaluate(
-      () => document.querySelector('[data-active="true"]')?.getAttribute("data-content-id") ?? null,
+      () =>
+        document.querySelector('[data-active="true"]')?.getAttribute("data-content-id") ??
+        null,
     );
-    check(scrolled, `a scroll gesture did not move to item_signal_3 (on ${measured.scrollGestureMovedTo})`);
+    check(
+      scrolled,
+      `a scroll gesture did not move to item_signal_3 (on ${measured.scrollGestureMovedTo})`,
+    );
     // Report only: from the first scroll event of the gesture, snap and
     // settle included, to the first frame (docs/standard.md §3).
     if (scrolled) {
@@ -547,7 +576,11 @@ try {
 
   // Resume: an episode outside the first frame still reopens where it was.
   const resumeTarget = SCALE
-    ? { contentId: "item_stress_3_10", seriesId: "series_stress_3", episodeId: "ep_stress_3_10" }
+    ? {
+        contentId: "item_stress_3_10",
+        seriesId: "series_stress_3",
+        episodeId: "ep_stress_3_10",
+      }
     : { contentId: "item_signal_4", seriesId: "series_signal", episodeId: "ep_signal_4" };
   const resumeContext = await browser.newContext({
     viewport: { width: 375, height: 812 },
@@ -555,17 +588,20 @@ try {
     hasTouch: true,
   });
   await resumeContext.addInitScript(installPlayingProbe);
-  await resumeContext.addInitScript((snapshot) => {
-    window.localStorage.setItem("project-flow.resume.v1", JSON.stringify(snapshot));
-  }, {
-    ...resumeTarget,
-    positionMs: 5_000,
-    durationMs: 10_000,
-    muted: true,
-    captionsOn: false,
-    updatedAt: Date.now(),
-    completed: false,
-  });
+  await resumeContext.addInitScript(
+    (snapshot) => {
+      window.localStorage.setItem("project-flow.resume.v1", JSON.stringify(snapshot));
+    },
+    {
+      ...resumeTarget,
+      positionMs: 5_000,
+      durationMs: 10_000,
+      muted: true,
+      captionsOn: false,
+      updatedAt: Date.now(),
+      completed: false,
+    },
+  );
   const resumed = await resumeContext.newPage();
   trackPage(resumed, "resume", consoleErrors, []);
   await resumed.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
@@ -588,7 +624,10 @@ try {
     await resumed.click('[aria-label="Continue episode"]');
     await sleep(800);
     const afterContinue = await resumed.evaluate(activeVideoTime);
-    measured.resume.continueSeek = { beforeSeconds: beforeContinue, afterSeconds: afterContinue };
+    measured.resume.continueSeek = {
+      beforeSeconds: beforeContinue,
+      afterSeconds: afterContinue,
+    };
     check(
       afterContinue !== null && afterContinue >= 4.5,
       `Continue did not seek to the saved 5 s: the episode was at ${beforeContinue} s, then ${afterContinue} s`,
@@ -632,7 +671,10 @@ try {
       played && state !== null && !state.paused && state.seconds >= 1,
       `a stored unmuted preference left the first episode stopped (${JSON.stringify(state)})`,
     );
-    check(state?.muted === true, `autoplay on return is not muted (${JSON.stringify(state)})`);
+    check(
+      state?.muted === true,
+      `autoplay on return is not muted (${JSON.stringify(state)})`,
+    );
     await mutedContext.close();
   }
 
@@ -640,11 +682,19 @@ try {
   {
     const [finished, expectedNext] = SCALE
       ? [
-          { contentId: "item_stress_3_10", seriesId: "series_stress_3", episodeId: "ep_stress_3_10" },
+          {
+            contentId: "item_stress_3_10",
+            seriesId: "series_stress_3",
+            episodeId: "ep_stress_3_10",
+          },
           "item_stress_3_11",
         ]
       : [
-          { contentId: "item_signal_2", seriesId: "series_signal", episodeId: "ep_signal_2" },
+          {
+            contentId: "item_signal_2",
+            seriesId: "series_signal",
+            episodeId: "ep_signal_2",
+          },
           "item_signal_3",
         ];
     const returnContext = await phoneContext(browser, {
@@ -664,17 +714,24 @@ try {
       .waitForFunction(
         (id) =>
           window.__flowPlaying.some((entry) => entry.contentId === id) &&
-          document.querySelector('[aria-label="Continue story"]') !== null,
+          document.querySelector('[data-resume-offer="next_episode"]') !== null,
         expectedNext,
         { timeout: 8_000 },
       )
       .then(() => true)
       .catch(() => false);
-    const firstPlayed = await page.evaluate(() => window.__flowPlaying[0]?.contentId ?? null);
-    measured.returnAfterFinishing = { finished: finished.contentId, expectedNext, landed, firstPlayed };
+    const firstPlayed = await page.evaluate(
+      () => window.__flowPlaying[0]?.contentId ?? null,
+    );
+    measured.returnAfterFinishing = {
+      finished: finished.contentId,
+      expectedNext,
+      landed,
+      firstPlayed,
+    };
     check(
       landed && firstPlayed === expectedNext,
-      `after finishing ${finished.contentId} the viewer landed on ${firstPlayed}, not ${expectedNext} with its offer`,
+      `after finishing ${finished.contentId} the viewer landed on ${firstPlayed}, not ${expectedNext} with its Next episode label`,
     );
     await returnContext.close();
   }
@@ -688,10 +745,13 @@ try {
     const failedWhileOffline = [];
     page.on("requestfailed", (request) => {
       const { pathname } = new URL(request.url());
-      if (pathname.includes("/hls/")) failedWhileOffline.push(pathname.replace(/^.*\/hls\//, ""));
+      if (pathname.includes("/hls/"))
+        failedWhileOffline.push(pathname.replace(/^.*\/hls\//, ""));
     });
     await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
-    await page.waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 10_000 });
+    await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+      timeout: 10_000,
+    });
     // The feed page is built (catalog fetched): episode 3 has a slide to warm in.
     await page.waitForFunction(
       () => (document.querySelector('[role="feed"]')?.children.length ?? 0) >= 4,
@@ -716,11 +776,19 @@ try {
           const poll = () => {
             const active = document.querySelector('[data-active="true"]');
             if (active?.querySelector('[role="status"]')) errorShown = true;
-            const played = window.__flowPlaying.slice(seen).map((entry) => entry.contentId);
+            const played = window.__flowPlaying
+              .slice(seen)
+              .map((entry) => entry.contentId);
             if (played.includes("item_signal_3")) {
-              resolveOutcome({ result: "played", ms: Math.round(performance.now() - start) });
+              resolveOutcome({
+                result: "played",
+                ms: Math.round(performance.now() - start),
+              });
             } else if (errorShown && played.includes("item_signal_4")) {
-              resolveOutcome({ result: "error_then_skip", ms: Math.round(performance.now() - start) });
+              resolveOutcome({
+                result: "error_then_skip",
+                ms: Math.round(performance.now() - start),
+              });
             } else if (performance.now() - start > 15_000) {
               const video = active?.querySelector("video");
               resolveOutcome({
@@ -737,7 +805,10 @@ try {
           poll();
         }),
     );
-    measured.offlineWhileWarming = { ...outcome, failedMediaRequests: failedWhileOffline };
+    measured.offlineWhileWarming = {
+      ...outcome,
+      failedMediaRequests: failedWhileOffline,
+    };
     check(
       outcome.result === "played" || outcome.result === "error_then_skip",
       `after going offline while episode 3 warmed and coming back, it never played: ${JSON.stringify(outcome)}`,
@@ -747,11 +818,15 @@ try {
     // 13: an episode whose media cannot load shows the error, then skips by itself.
     const brokenContext = await phoneContext(browser, null);
     const broken = await brokenContext.newPage();
-    broken.on("pageerror", (error) => consoleErrors.push(`broken episode: ${error.message}`));
+    broken.on("pageerror", (error) =>
+      consoleErrors.push(`broken episode: ${error.message}`),
+    );
     await broken.route("**/hls/episode-3/**", (route) =>
       route.fulfill({ status: 404, body: "not found" }),
     );
-    await broken.goto(`${BASE}/watch/signal-night/episode-3`, { waitUntil: "domcontentloaded" });
+    await broken.goto(`${BASE}/watch/signal-night/episode-3`, {
+      waitUntil: "domcontentloaded",
+    });
     const failure = await broken.evaluate(
       () =>
         new Promise((resolveFailure) => {
@@ -761,11 +836,14 @@ try {
             const active = document.querySelector('[data-active="true"]');
             const status = active?.querySelector('[role="status"]');
             if (status && shownAt === null) shownAt = performance.now();
-            const skipped = window.__flowPlaying.find((entry) => entry.contentId === "item_signal_4");
+            const skipped = window.__flowPlaying.find(
+              (entry) => entry.contentId === "item_signal_4",
+            );
             if (skipped) {
               resolveFailure({
                 errorShownMs: shownAt === null ? null : Math.round(shownAt - start),
-                errorVisibleForMs: shownAt === null ? null : Math.round(skipped.at - shownAt),
+                errorVisibleForMs:
+                  shownAt === null ? null : Math.round(skipped.at - shownAt),
                 skippedTo: skipped.contentId,
               });
             } else if (performance.now() - start > 20_000) {
@@ -802,7 +880,9 @@ try {
       const watching = await glimpseContext.newPage();
       trackPage(watching, "glimpse", consoleErrors, []);
       await watching.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
-      await watching.waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 10_000 });
+      await watching.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
       await sleep(4_000);
       const glimpsed = await watching.evaluate(swipeAndWaitForPlaying, "item_signal_2");
       await sleep(1_000);
@@ -813,14 +893,23 @@ try {
       const returning = await glimpseContext.newPage();
       trackPage(returning, "return after a glimpse", consoleErrors, []);
       await returning.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
-      await returning.waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 10_000 });
+      await returning.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
       await sleep(2_500);
       const reopened = await returning.evaluate(() => ({
         firstPlayed: window.__flowPlaying[0]?.contentId ?? null,
-        active: document.querySelector('[data-active="true"]')?.getAttribute("data-content-id") ?? null,
-        strip: document.querySelector('[aria-label="Continue story"]')?.textContent ?? null,
+        active:
+          document
+            .querySelector('[data-active="true"]')
+            ?.getAttribute("data-content-id") ?? null,
+        strip: document.querySelector("[data-resume-offer]")?.textContent ?? null,
       }));
-      const savedEntry = Array.isArray(stored?.entries) ? stored.entries[0] : Array.isArray(stored) ? stored[0] : stored;
+      const savedEntry = Array.isArray(stored?.entries)
+        ? stored.entries[0]
+        : Array.isArray(stored)
+          ? stored[0]
+          : stored;
       measured.returnAfterGlimpse = {
         glimpsed: glimpsed !== null,
         savedContentId: savedEntry?.contentId ?? null,
@@ -829,7 +918,9 @@ try {
       };
       check(glimpsed !== null, "the glimpse check could not swipe to item_signal_2");
       check(
-        reopened.firstPlayed === "item_signal_1" && reopened.active === "item_signal_1" && reopened.strip === null,
+        reopened.firstPlayed === "item_signal_1" &&
+          reopened.active === "item_signal_1" &&
+          reopened.strip === null,
         `after glimpsing item_signal_2 for 1 s the viewer reopened on ${reopened.active} (strip: ${reopened.strip}), not the top of the feed without a strip`,
       );
       await glimpseContext.close();
@@ -840,7 +931,9 @@ try {
       const continuedContext = await phoneContext(browser, null);
       const watching = await continuedContext.newPage();
       trackPage(watching, "auto-continue then leave", consoleErrors, []);
-      await watching.goto(`${BASE}/watch/signal-night/episode-2`, { waitUntil: "domcontentloaded" });
+      await watching.goto(`${BASE}/watch/signal-night/episode-2`, {
+        waitUntil: "domcontentloaded",
+      });
       const continuedTo3 = await watching
         .waitForFunction(
           () => window.__flowPlaying.some((entry) => entry.contentId === "item_signal_3"),
@@ -858,7 +951,7 @@ try {
         .waitForFunction(
           () =>
             window.__flowPlaying[0]?.contentId === "item_signal_3" &&
-            document.querySelector('[aria-label="Continue story"]') !== null,
+            document.querySelector('[data-resume-offer="next_episode"]') !== null,
           null,
           { timeout: 10_000 },
         )
@@ -866,12 +959,19 @@ try {
         .catch(() => false);
       const state = await returning.evaluate(() => ({
         firstPlayed: window.__flowPlaying[0]?.contentId ?? null,
-        strip: document.querySelector('[aria-label="Continue story"]')?.textContent ?? null,
+        strip:
+          document.querySelector('[data-resume-offer="next_episode"]')?.textContent ??
+          null,
+        stripHasButton:
+          document.querySelector('[data-resume-offer="next_episode"] button') !== null,
       }));
       measured.returnAfterAutoContinue = { continuedTo3, landed, ...state };
       check(
-        continuedTo3 && landed && state.strip?.startsWith("Up next") === true,
-        `leaving episode 3 right after auto-continue reopened on ${state.firstPlayed} (strip: ${state.strip}), not episode 3 with Up next`,
+        continuedTo3 &&
+          landed &&
+          state.strip?.startsWith("Next episode") === true &&
+          !state.stripHasButton,
+        `leaving episode 3 right after auto-continue reopened on ${state.firstPlayed} (label: ${state.strip}), not episode 3 with a Next episode label and no button`,
       );
       await continuedContext.close();
     }
@@ -881,7 +981,9 @@ try {
     {
       const flakyContext = await phoneContext(browser, null);
       const page = await flakyContext.newPage();
-      page.on("pageerror", (error) => consoleErrors.push(`flaky playlist: ${error.message}`));
+      page.on("pageerror", (error) =>
+        consoleErrors.push(`flaky playlist: ${error.message}`),
+      );
       const answers = [];
       const start = Date.now();
       await page.route("**/hls/episode-1/master.m3u8", async (route) => {
@@ -902,7 +1004,12 @@ try {
       const playingAt = played ? Date.now() - start : null;
       const statusSeen = await page.evaluate(activeStatus);
       const gaps = answers.slice(1).map((answer, i) => answer.at - answers[i].at);
-      measured.flakyPlaylist = { answers, gapsMs: gaps, playingAt, status: statusSeen.status };
+      measured.flakyPlaylist = {
+        answers,
+        gapsMs: gaps,
+        playingAt,
+        status: statusSeen.status,
+      };
       check(
         played && answers.filter((answer) => answer.status === 503).length === 4,
         `a playlist that answered 503 four times did not play afterwards: ${JSON.stringify(measured.flakyPlaylist)}`,
@@ -923,17 +1030,28 @@ try {
       trackPage(page, "muted fallback", consoleErrors, []);
       const events = collectAnalytics(page);
       await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
-      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 10_000 });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
       // An untrusted key: the app turns sound on, the page has no gesture.
-      await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "m" })));
+      await page.evaluate(() =>
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "m" })),
+      );
       await sleep(300);
       const next = await page.evaluate(swipeAndWaitForPlaying, "item_signal_2");
       await sleep(1_000);
       const state = await page.evaluate(activeStatus);
       const fallback = events.some((event) => event.name === "autoplay_muted_fallback");
-      measured.mutedFallback = { playedNext: next !== null, fallbackEvent: fallback, ...state };
+      measured.mutedFallback = {
+        playedNext: next !== null,
+        fallbackEvent: fallback,
+        ...state,
+      };
       check(
-        next !== null && state.active === "item_signal_2" && state.muted === true && state.paused === false,
+        next !== null &&
+          state.active === "item_signal_2" &&
+          state.muted === true &&
+          state.paused === false,
         `with sound refused, the next episode did not play muted: ${JSON.stringify(measured.mutedFallback)}`,
       );
       check(fallback, "autoplay_muted_fallback was not sent when sound was refused");
@@ -946,7 +1064,9 @@ try {
     {
       const deadContext = await phoneContext(browser, null);
       const page = await deadContext.newPage();
-      page.on("pageerror", (error) => consoleErrors.push(`dead network: ${error.message}`));
+      page.on("pageerror", (error) =>
+        consoleErrors.push(`dead network: ${error.message}`),
+      );
       await page.route("**/hls/**", () => {
         // Never answered.
       });
@@ -960,9 +1080,14 @@ try {
         const key = `${state.active}|${state.status ?? ""}`;
         if (key !== last) {
           last = key;
-          timeline.push({ at: Date.now() - start, active: state.active, status: state.status });
+          timeline.push({
+            at: Date.now() - start,
+            active: state.active,
+            status: state.status,
+          });
         }
-        if (heldAt === null && state.status?.includes("Connection problem")) heldAt = Date.now();
+        if (heldAt === null && state.status?.includes("Connection problem"))
+          heldAt = Date.now();
         if (heldAt !== null && Date.now() - heldAt >= 7_000) break;
         await sleep(250);
       }
@@ -979,12 +1104,425 @@ try {
         `with no data the feed did not skip exactly two episodes before waiting: ${JSON.stringify(timeline)}`,
       );
       check(
-        heldAt !== null && final.status?.includes("Connection problem") === true && final.active === skippedTo[2],
+        heldAt !== null &&
+          final.status?.includes("Connection problem") === true &&
+          final.active === skippedTo[2],
         `with no data the feed did not stop on a connection problem: ${JSON.stringify(final)}`,
       );
       await page.unrouteAll({ behavior: "ignoreErrors" });
       await deadContext.close();
     }
+  }
+
+  if (!SCALE) {
+    // 19: the first seconds. Muted, the dialogue is on screen in the app's own
+    // layer above the title block; the browser draws no cue; one "Tap for
+    // sound" cue shows, the first tap removes it and turns the sound on, and it
+    // never comes back. The mute button does not pulse.
+    {
+      const firstContext = await phoneContext(browser, null);
+      const page = await firstContext.newPage();
+      trackPage(page, "first seconds", consoleErrors, []);
+      const events = collectAnalytics(page);
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      const shown = await page
+        .waitForFunction(
+          () =>
+            document.querySelector('[data-active="true"] [data-caption]')?.textContent ===
+              "Something is wrong with the night." &&
+            document.querySelector('[data-notice="sound"]') !== null,
+          null,
+          { timeout: 4_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      const layout = await page.evaluate(() => {
+        const active = document.querySelector('[data-active="true"]');
+        const caption = active?.querySelector("[data-caption]")?.getBoundingClientRect();
+        const position = active?.querySelector("[data-episode-position]");
+        const video = active?.querySelector("video");
+        const mute = active?.querySelector('[aria-label="Unmute"][aria-pressed]');
+        return {
+          captionBottom: caption ? Math.round(caption.bottom) : null,
+          captionTop: caption ? Math.round(caption.top) : null,
+          positionTop: position ? Math.round(position.getBoundingClientRect().top) : null,
+          position: position?.querySelector('[aria-hidden="true"]')?.textContent ?? null,
+          positionLabel: position?.textContent ?? null,
+          trackModes: video ? [...video.textTracks].map((track) => track.mode) : [],
+          notice: document.querySelector('[data-notice="sound"]')?.textContent ?? null,
+          muteAnimation: mute ? getComputedStyle(mute).animationName : null,
+        };
+      });
+      await page.mouse.click(120, 300);
+      await sleep(400);
+      const afterTap = await page.evaluate(() => ({
+        notice: document.querySelector('[data-notice="sound"]') !== null,
+        muted: document.querySelector('[data-active="true"] video')?.muted ?? null,
+        caption: document.querySelector('[data-active="true"] [data-caption]') !== null,
+      }));
+      await sleep(5_000);
+      const later = await page.evaluate(
+        () => document.querySelector("[data-notice]") !== null,
+      );
+      const cueShown = events.filter((event) => event.name === "sound_cue_shown").length;
+      const soundToggled = events.find((event) => event.name === "sound_toggled");
+      measured.firstSeconds = { shown, layout, afterTap, cueBackLater: later, cueShown };
+      check(
+        shown,
+        `muted cold open: no caption layer or no sound cue within 4 s (${JSON.stringify(layout)})`,
+      );
+      check(
+        layout.captionBottom !== null &&
+          layout.positionTop !== null &&
+          layout.captionBottom <= layout.positionTop &&
+          layout.captionTop >= 0,
+        `captions are not above the title block: ${JSON.stringify(layout)}`,
+      );
+      check(
+        layout.trackModes.length > 0 &&
+          layout.trackModes.every((mode) => mode === "hidden"),
+        `the browser still draws cues itself: track modes ${layout.trackModes.join(", ")}`,
+      );
+      check(
+        layout.position === "Episode 1 / 5",
+        `episode position reads "${layout.position}"`,
+      );
+      check(
+        layout.muteAnimation === "none",
+        `the mute button still animates (${layout.muteAnimation})`,
+      );
+      check(
+        !afterTap.notice && afterTap.muted === false && !afterTap.caption,
+        `the first tap did not remove the cue, turn sound on and hand captions back to the sound: ${JSON.stringify(afterTap)}`,
+      );
+      check(!later, "a notice came back after the sound was turned on");
+      check(cueShown === 1, `sound_cue_shown sent ${cueShown} times`);
+      check(
+        soundToggled?.properties?.source === "surface" &&
+          soundToggled?.properties?.muted === false,
+        `sound_toggled missing or wrong: ${JSON.stringify(soundToggled ?? null)}`,
+      );
+      await firstContext.close();
+    }
+
+    // 20: an explicit caption choice wins over the sound and survives a reload.
+    {
+      const choiceContext = await phoneContext(browser, null);
+      const page = await choiceContext.newPage();
+      trackPage(page, "caption choice", consoleErrors, []);
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      await page.click('[data-active="true"] [aria-label="Hide captions"]');
+      const stored = await page.evaluate(() =>
+        window.localStorage.getItem("project-flow.captions.v1"),
+      );
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      await page.waitForFunction(
+        () =>
+          (document.querySelector('[data-active="true"] video')?.currentTime ?? 0) >= 1.2,
+        null,
+        { timeout: 8_000 },
+      );
+      const reloaded = await page.evaluate(() => ({
+        muted: document.querySelector('[data-active="true"] video')?.muted ?? null,
+        caption: document.querySelector('[data-active="true"] [data-caption]') !== null,
+        toggle:
+          document.querySelector('[data-active="true"] [aria-label="Show captions"]') !==
+          null,
+      }));
+      measured.captionChoice = { stored, reloaded };
+      check(
+        stored === "off" &&
+          reloaded.muted === true &&
+          !reloaded.caption &&
+          reloaded.toggle,
+        `captions turned off by the viewer came back while muted: ${JSON.stringify(measured.captionChoice)}`,
+      );
+      await choiceContext.close();
+    }
+
+    // 21: sharing says what happened. A copied link shows "Link copied" in a
+    // status region; closing the share sheet copies nothing.
+    {
+      const copyContext = await phoneContext(browser, null);
+      await copyContext.addInitScript(() => {
+        Object.defineProperty(Navigator.prototype, "share", {
+          value: undefined,
+          configurable: true,
+        });
+        window.__flowCopied = [];
+        Object.defineProperty(Navigator.prototype, "clipboard", {
+          configurable: true,
+          get: () => ({
+            writeText: (text) => {
+              window.__flowCopied.push(text);
+              return Promise.resolve();
+            },
+          }),
+        });
+      });
+      const page = await copyContext.newPage();
+      trackPage(page, "share copy", consoleErrors, []);
+      const events = collectAnalytics(page);
+      await page.goto(`${BASE}/watch/signal-night/episode-2`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      await page.waitForFunction(
+        () =>
+          (document.querySelector('[data-active="true"] video')?.currentTime ?? 0) >= 7,
+        null,
+        { timeout: 10_000 },
+      );
+      await page.click('[data-active="true"] [aria-label="Share"]');
+      const copied = await page
+        .waitForFunction(
+          () =>
+            document.querySelector('[data-notice="share_copied"]')?.textContent ===
+              "Link copied" &&
+            [...document.querySelectorAll('[role="status"]')].some(
+              (region) => region.textContent === "Link copied",
+            ),
+          null,
+          { timeout: 2_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      const link = await page.evaluate(() => window.__flowCopied[0] ?? null);
+      const startSeconds = link ? new URL(link).searchParams.get("t") : null;
+      await sleep(2_300);
+      const gone = await page.evaluate(
+        () => document.querySelector("[data-notice]") === null,
+      );
+      measured.shareCopy = { copied, link, gone };
+      check(copied, 'copying a link showed no "Link copied" status');
+      check(
+        link?.includes("/watch/signal-night/episode-2") === true &&
+          Number(startSeconds) >= 3,
+        `the copied link is not the episode at the shared moment: ${link}`,
+      );
+      check(gone, "the Link copied notice did not leave on its own");
+      check(
+        events.some((event) => event.name === "share_copy"),
+        "share_copy was not sent after copying",
+      );
+      await copyContext.close();
+
+      const cancelContext = await phoneContext(browser, null);
+      await cancelContext.addInitScript(() => {
+        window.__flowCopied = [];
+        Object.defineProperty(Navigator.prototype, "share", {
+          configurable: true,
+          value: () => Promise.reject(new DOMException("closed", "AbortError")),
+        });
+        Object.defineProperty(Navigator.prototype, "clipboard", {
+          configurable: true,
+          get: () => ({
+            writeText: (text) => {
+              window.__flowCopied.push(text);
+              return Promise.resolve();
+            },
+          }),
+        });
+      });
+      const cancelled = await cancelContext.newPage();
+      trackPage(cancelled, "share cancel", consoleErrors, []);
+      const cancelEvents = collectAnalytics(cancelled);
+      await cancelled.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await cancelled.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      await cancelled.click('[data-active="true"] [aria-label="Share"]');
+      await sleep(600);
+      const state = await cancelled.evaluate(() => ({
+        copied: window.__flowCopied.length,
+        notice: document.querySelector('[data-notice^="share"]') !== null,
+      }));
+      measured.shareCancel = state;
+      check(
+        state.copied === 0 &&
+          !state.notice &&
+          cancelEvents.some((event) => event.name === "share_cancel"),
+        `closing the share sheet still copied or announced something: ${JSON.stringify(state)}`,
+      );
+      await cancelContext.close();
+    }
+
+    // 22: a shared moment opens there, still as an autoplay, with no offer.
+    {
+      const momentContext = await phoneContext(browser, null);
+      const page = await momentContext.newPage();
+      trackPage(page, "timestamped share", consoleErrors, []);
+      await page.goto(`${BASE}/watch/signal-night/episode-3?t=4&utm_source=share`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      const at = await page.evaluate(() => ({
+        active:
+          document
+            .querySelector('[data-active="true"]')
+            ?.getAttribute("data-content-id") ?? null,
+        seconds:
+          document.querySelector('[data-active="true"] video')?.currentTime ?? null,
+        offer: document.querySelector("[data-resume-offer]") !== null,
+      }));
+      measured.timestampedShare = at;
+      check(
+        at.active === "item_signal_3" &&
+          at.seconds !== null &&
+          at.seconds >= 3.9 &&
+          !at.offer,
+        `a link shared at 4 s did not open there: ${JSON.stringify(at)}`,
+      );
+      await momentContext.close();
+    }
+
+    // 23: a pause the viewer asked for shows a play glyph; playing again removes it.
+    {
+      const pauseContext = await phoneContext(browser, null);
+      const page = await pauseContext.newPage();
+      trackPage(page, "pause glyph", consoleErrors, []);
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      await page.mouse.click(120, 300); // sound on
+      await sleep(400);
+      await page.mouse.click(120, 300); // pause
+      await sleep(400);
+      const paused = await page.evaluate(() => ({
+        paused: document.querySelector('[data-active="true"] video')?.paused ?? null,
+        glyph:
+          document.querySelector('[data-active="true"] [data-paused-glyph]') !== null,
+      }));
+      await page.mouse.click(120, 300); // play
+      await sleep(400);
+      const resumed = await page.evaluate(() => ({
+        paused: document.querySelector('[data-active="true"] video')?.paused ?? null,
+        glyph:
+          document.querySelector('[data-active="true"] [data-paused-glyph]') !== null,
+      }));
+      measured.pauseGlyph = { paused, resumed };
+      check(
+        paused.paused === true &&
+          paused.glyph &&
+          resumed.paused === false &&
+          !resumed.glyph,
+        `pause did not show the play glyph or play did not remove it: ${JSON.stringify(measured.pauseGlyph)}`,
+      );
+      await pauseContext.close();
+    }
+  }
+
+  // 24: the end of a series is a handoff: share and follow, and another story
+  // only on an explicit tap. Nothing starts by itself.
+  {
+    const endPath = SCALE
+      ? "/watch/stress-2/episode-60"
+      : "/watch/signal-night/episode-5";
+    const endId = SCALE ? "item_stress_2_60" : "item_signal_5";
+    const endContext = await phoneContext(browser, null);
+    const page = await endContext.newPage();
+    trackPage(page, "series end", consoleErrors, []);
+    const events = collectAnalytics(page);
+    await page.goto(`${BASE}${endPath}`, { waitUntil: "domcontentloaded" });
+    const ended = await page
+      .waitForSelector('[data-series-end="series_complete"]', { timeout: 30_000 })
+      .then(() => true)
+      .catch(() => false);
+    const playsAtEnd = await page.evaluate(() => window.__flowPlaying.length);
+    await sleep(6_000);
+    const surface = await page.evaluate(() => {
+      const end = document.querySelector("[data-series-end]");
+      return {
+        text: end?.textContent ?? null,
+        active:
+          document
+            .querySelector('[data-active="true"]')
+            ?.getAttribute("data-content-id") ?? null,
+        plays: window.__flowPlaying.length,
+        share: [...(end?.querySelectorAll("button") ?? [])].some(
+          (button) => button.textContent === "Share this story",
+        ),
+        follow: [...(end?.querySelectorAll("button") ?? [])].some(
+          (button) => button.textContent === "Follow series",
+        ),
+        nextStory:
+          end?.querySelector("[data-next-story]")?.getAttribute("data-next-story") ??
+          null,
+      };
+    });
+    measured.seriesEnd = { ended, ...surface, playsAtEnd };
+    check(ended, `the end of the series never showed on ${endPath}`);
+    check(
+      surface.text?.includes("Series complete") === true &&
+        surface.share &&
+        surface.follow,
+      `the series end lacks its label, share or follow: ${JSON.stringify(surface)}`,
+    );
+    check(
+      surface.active === endId && surface.plays === playsAtEnd,
+      `something started by itself after the series ended: ${JSON.stringify(surface)}`,
+    );
+    const offered = events.find((event) => event.name === "next_story_offered");
+    check(
+      offered !== undefined &&
+        (offered.properties?.next_content_id ?? null) === surface.nextStory,
+      `next_story_offered missing or not what was shown: ${JSON.stringify(offered ?? null)}`,
+    );
+    if (SCALE) {
+      check(
+        surface.nextStory !== null &&
+          /^item_stress_\d+_1$/.test(surface.nextStory) &&
+          !surface.nextStory.startsWith("item_stress_2_"),
+        `the series end did not offer another story from its first episode: ${surface.nextStory}`,
+      );
+      if (surface.nextStory) {
+        await page.click("[data-next-story]");
+        const opened = await page
+          .waitForFunction(
+            (id) => window.__flowPlaying.some((entry) => entry.contentId === id),
+            surface.nextStory,
+            { timeout: 10_000 },
+          )
+          .then(() => true)
+          .catch(() => false);
+        measured.seriesEnd.nextStoryPlayed = opened;
+        check(opened, `tapping the next story did not play ${surface.nextStory}`);
+        check(
+          events.some((event) => event.name === "next_story_open"),
+          "next_story_open was not sent",
+        );
+      }
+    } else {
+      check(
+        surface.nextStory === null &&
+          surface.text?.includes("every story we have") === true,
+        `with a single series the end does not say so honestly: ${JSON.stringify(surface)}`,
+      );
+      await page.click('[data-series-end] [aria-pressed="false"]');
+      const following = await page.evaluate(
+        () =>
+          document.querySelector("[data-series-end] [aria-pressed]")?.textContent ?? null,
+      );
+      check(
+        following === "Following",
+        `Follow on the series end did not follow (${following})`,
+      );
+    }
+    await endContext.close();
   }
 
   // 6: unknown episode.

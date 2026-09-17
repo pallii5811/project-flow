@@ -72,6 +72,8 @@ type FeedItemViewProps = {
   captionsOn: boolean;
   /** Episodes in the series, for "Episode 3 / 60"; null when unknown. */
   episodeCount: number | null;
+  /** The Continue strip covers the title block: captions move above it. */
+  overlayCovered?: boolean;
   liked: boolean;
   following: boolean;
   seekToMs: number | null;
@@ -90,6 +92,7 @@ function FeedItemViewImpl({
   muted,
   captionsOn,
   episodeCount,
+  overlayCovered = false,
   liked,
   following,
   seekToMs,
@@ -100,10 +103,7 @@ function FeedItemViewImpl({
   handlers,
 }: FeedItemViewProps): ReactElement {
   const [playing, setPlaying] = useState(false);
-  /**
-   * A frame of this activation reached the screen. The poster stays away
-   * from then on, so a pause keeps the frozen frame (UX-03).
-   */
+  /** A frame of this activation reached the screen: a later pause is a real pause. */
   const [hasPlayed, setHasPlayed] = useState(false);
   /** The viewer paused: a play glyph confirms it. */
   const [viewerPaused, setViewerPaused] = useState(false);
@@ -198,7 +198,7 @@ function FeedItemViewImpl({
     return () => window.removeEventListener("online", retryIfFailed);
   }, []);
 
-  const showPoster = !active || failed || !(playing || hasPlayed);
+  const showPoster = !playing || failed || !active;
   const playableUrl = resolved.ok ? resolved.playback.url : "";
   const posterUrl = resolved.ok ? resolved.playback.posterUrl : item.thumbnailUrl;
   const mountPlayer = resolved.ok && !failed && (active || preload !== "none");
@@ -281,7 +281,12 @@ function FeedItemViewImpl({
                 const classified = classifyMediaError(mediaCode);
                 setFailed(true);
                 setPlaying(false);
-                handlers.onError(item, classified.code, classified.reason, connection === true);
+                handlers.onError(
+                  item,
+                  classified.code,
+                  classified.reason,
+                  connection === true,
+                );
               },
               onPlay: () => handlers.onPlay(item),
               onPlaying: (info) => {
@@ -296,7 +301,8 @@ function FeedItemViewImpl({
               onPause: () => {
                 setPlaying(false);
                 // A hidden tab pauses too; only a pause the viewer can see is theirs.
-                if (active && document.visibilityState === "visible") setViewerPaused(true);
+                if (active && document.visibilityState === "visible")
+                  setViewerPaused(true);
                 handlers.onPause(item);
               },
               onCueChange: (payloads) => setCueText(activeCueText(payloads)),
@@ -332,13 +338,20 @@ function FeedItemViewImpl({
         episodeNumber={item.episodeNumber}
         episodeCount={episodeCount}
         caption={active && captionsOn && !failed ? cueText : null}
+        covered={overlayCovered}
         progressStore={progressStore}
         active={active}
       />
 
       {active && viewerPaused && hasPlayed && !playing && !failed && !showPlayGate ? (
-        <div className={styles.pausedGlyph} aria-hidden="true">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" focusable="false">
+        <div className={styles.pausedGlyph} aria-hidden="true" data-paused-glyph="true">
+          <svg
+            width="30"
+            height="30"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            focusable="false"
+          >
             <path d="M8.5 5.8v12.4L19 12 8.5 5.8z" />
           </svg>
         </div>
@@ -385,7 +398,10 @@ function FeedItemViewImpl({
         />
       ) : null}
 
-      <PlayGate visible={active && showPlayGate && !failed} onPlay={handlers.onPlayGate} />
+      <PlayGate
+        visible={active && showPlayGate && !failed}
+        onPlay={handlers.onPlayGate}
+      />
     </article>
   );
 }
@@ -403,7 +419,5 @@ export const FeedSlidePlaceholder = memo(function FeedSlidePlaceholder({
 }: {
   contentId: string;
 }): ReactElement {
-  return (
-    <div className={styles.slide} data-content-id={contentId} aria-hidden="true" />
-  );
+  return <div className={styles.slide} data-content-id={contentId} aria-hidden="true" />;
 });
