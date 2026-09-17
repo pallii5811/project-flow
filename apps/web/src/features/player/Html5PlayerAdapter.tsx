@@ -18,6 +18,7 @@ import {
   isAbort,
   isNotAllowed,
   reattachPosition,
+  recoveryConfirmed,
   seekTarget,
   shouldFallBackToMuted,
   type FatalKind,
@@ -138,6 +139,8 @@ export function Html5PlayerAdapter({
   const retryTimerRef = useRef<number | null>(null);
   const watchdogTimerRef = useRef<number | null>(null);
   const watchdogReattachedRef = useRef(false);
+  /** Position (s) a retry or watchdog re-attach continued from, until playback proves it. */
+  const recoveredFromRef = useRef<number | null>(null);
   const lastProgressAtRef = useRef(0);
   const attachedAtRef = useRef(0);
   /** Autoplay refused: a play gate waits for a tap. */
@@ -191,13 +194,14 @@ export function Html5PlayerAdapter({
     }
     if (action === "reattach") {
       watchdogReattachedRef.current = true;
+      recoveredFromRef.current = video.currentTime;
       attachSource(reattachPosition(video.currentTime));
       void tryPlay(video);
       return;
     }
     deadRef.current = true;
     hlsRef.current?.stopLoad();
-    eventsRef.current.onError?.("No playback progress", 2);
+    eventsRef.current.onError?.("No playback progress", 2, true);
   }
 
   function clearRetryTimer() {
@@ -235,6 +239,7 @@ export function Html5PlayerAdapter({
       retryTimerRef.current = window.setTimeout(() => {
         retryTimerRef.current = null;
         if (generation !== sourceGenerationRef.current || videoRef.current !== video) return;
+        recoveredFromRef.current = video.currentTime;
         attachSource(reattachPosition(video.currentTime));
         if (activeRef.current) void tryPlay(video);
       }, decision.delayMs);
@@ -249,7 +254,7 @@ export function Html5PlayerAdapter({
     // again when it becomes active (PB-1).
     if (!activeRef.current) return;
     clearWatchdog();
-    eventsRef.current.onError?.(message, decision.mediaErrorCode);
+    eventsRef.current.onError?.(message, decision.mediaErrorCode, decision.connection);
   }
 
   // Attach listeners once — prevent leaks from rebinding on active/seek changes.
@@ -288,6 +293,14 @@ export function Html5PlayerAdapter({
     const onTimeUpdate = () => {
       if (!activeRef.current) return;
       if (!video.paused) markProgress();
+      // A recovery that really played on: the next, unrelated stall gets its
+      // own retries and its own re-attach.
+      const recoveredFrom = recoveredFromRef.current;
+      if (recoveredFrom !== null && recoveryConfirmed(recoveredFrom, video.currentTime)) {
+        recoveredFromRef.current = null;
+        networkRetriesRef.current = 0;
+        watchdogReattachedRef.current = false;
+      }
       const durationMs = Number.isFinite(video.duration) ? video.duration * 1000 : 0;
       eventsRef.current.onTimeUpdate?.(video.currentTime * 1000, durationMs);
     };
@@ -441,7 +454,7 @@ export function Html5PlayerAdapter({
         if (engine === "unsupported") {
           deadRef.current = true;
           if (activeRef.current) {
-            eventsRef.current.onError?.("Adaptive video is not supported here", 4);
+            eventsRef.current.onError?.("Adaptive video is not supported here", 4, false);
           }
           return;
         }
@@ -467,6 +480,7 @@ export function Html5PlayerAdapter({
     bufferingRef.current = false;
     networkRetriesRef.current = 0;
     mediaRecoveriesRef.current = 0;
+    recoveredFromRef.current = null;
     attachSource(null);
   }, [source.uri, source.poster, source.contentId, source.mimeType]);
 
@@ -591,6 +605,7 @@ export function Html5PlayerAdapter({
       gateRef.current = false;
       networkRetriesRef.current = 0;
       watchdogReattachedRef.current = false;
+      recoveredFromRef.current = null;
       // Died while warming (or before a previous error): attach a fresh one.
       if (deadRef.current || waitingOnlineRef.current) {
         attachSource(reattachPosition(video.currentTime));

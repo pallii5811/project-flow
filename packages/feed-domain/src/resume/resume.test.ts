@@ -10,6 +10,7 @@ import {
   RESUME_SERIES_CAP,
   createMemoryResumeStore,
   isResumable,
+  keepsFinishedEpisode,
   resumeLanding,
   upsertResumeEntry,
   type ResumeSnapshot,
@@ -85,12 +86,9 @@ describe("resumeLanding (VIR-1)", () => {
     expect(resumeLanding({ ...base, positionMs: 8_700 }, nextOf)?.reason).toBe("next_episode");
   });
 
-  it("lands on a barely started episode without a seek", () => {
-    expect(resumeLanding({ ...base, positionMs: 1_200 }, nextOf)).toEqual({
-      contentId: "item_signal_1",
-      positionMs: 0,
-      reason: "restart",
-    });
+  it("does not land on a barely started episode (a quick swipe away)", () => {
+    expect(resumeLanding({ ...base, positionMs: 1_200 }, nextOf)).toBeNull();
+    expect(resumeLanding({ ...base, positionMs: 274 }, nextOf)).toBeNull();
   });
 
   it("has nothing to continue after the last episode", () => {
@@ -98,6 +96,37 @@ describe("resumeLanding (VIR-1)", () => {
       resumeLanding({ ...base, contentId: "item_signal_5", completed: true }, nextOf),
     ).toBeNull();
     expect(resumeLanding(null, nextOf)).toBeNull();
+  });
+});
+
+describe("keepsFinishedEpisode (VIR-1)", () => {
+  const finished = { ...base, positionMs: 10_000, completed: true };
+  const glimpse = { ...base, contentId: "item_signal_2", episodeId: "ep_signal_2", positionMs: 300 };
+
+  it("an auto-continued episode left in its first seconds keeps the finished one", () => {
+    expect(keepsFinishedEpisode(finished, glimpse)).toBe(true);
+    const nearEnd = { ...base, positionMs: 9_700 };
+    expect(keepsFinishedEpisode(nearEnd, glimpse)).toBe(true);
+    // ...so the landing is the next episode, from its start.
+    expect(
+      resumeLanding(finished, (id) => (id === "item_signal_1" ? "item_signal_2" : null)),
+    ).toEqual({ contentId: "item_signal_2", positionMs: 0, reason: "next_episode" });
+  });
+
+  it("real progress in the next episode replaces the finished one", () => {
+    expect(keepsFinishedEpisode(finished, { ...glimpse, positionMs: 2_500 })).toBe(false);
+  });
+
+  it("a glimpse after an episode left midway replaces it, as before", () => {
+    expect(keepsFinishedEpisode(base, glimpse)).toBe(false);
+  });
+
+  it("never holds across series, on the same episode, or without a previous point", () => {
+    expect(keepsFinishedEpisode(finished, { ...glimpse, seriesId: "series_other" })).toBe(false);
+    expect(keepsFinishedEpisode(finished, { ...finished, positionMs: 100, completed: false })).toBe(
+      false,
+    );
+    expect(keepsFinishedEpisode(null, glimpse)).toBe(false);
   });
 });
 

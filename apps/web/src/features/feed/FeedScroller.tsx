@@ -10,7 +10,7 @@ import {
 } from "react";
 
 import { FeedItemView, FeedSlidePlaceholder, type FeedItemHandlers } from "./FeedItemView";
-import { isAtSlide, settledIndex } from "./feedLogic";
+import { isAtSlide, settledIndex, type FailureHold } from "./feedLogic";
 import type { ProgressStore } from "./progressStore";
 import styles from "./feed.module.css";
 
@@ -20,13 +20,20 @@ const SCROLL_SETTLE_FALLBACK_MS = 150;
 type FeedScrollerProps = {
   items: ContentItem[];
   index: number;
-  onIndexChange: (next: number) => void;
+  /**
+   * The slide on screen changed. `gestureStartedAt` (performance.now()) is the
+   * first scroll event of the gesture that got there, so swipe latency counts
+   * the snap and the settle wait the viewer sees; absent for keys.
+   */
+  onIndexChange: (next: number, gestureStartedAt?: number) => void;
   muted: boolean;
   captionsOn: boolean;
   likedIds: Set<string>;
   followingIds: Set<string>;
   seekToMs: number | null;
   showPlayGate: boolean;
+  /** Why the failed active episode waits instead of skipping, if it does. */
+  failureHold: FailureHold | null;
   prefetchIds: Set<string>;
   locale?: string | null;
   progressStore: ProgressStore;
@@ -45,6 +52,7 @@ export function FeedScroller({
   followingIds,
   seekToMs,
   showPlayGate,
+  failureHold,
   prefetchIds,
   locale,
   progressStore,
@@ -63,6 +71,8 @@ export function FeedScroller({
   );
 
   const scrollingFromProp = useRef(false);
+  /** performance.now() of the first scroll event since the scroller last rested. */
+  const gestureStartedAt = useRef<number | null>(null);
 
   useEffect(() => {
     const root = localRef.current;
@@ -89,13 +99,17 @@ export function FeedScroller({
 
     const commit = () => {
       settleTimer = null;
+      const startedAt = gestureStartedAt.current;
+      gestureStartedAt.current = null;
       if (scrollingFromProp.current) return;
       const next = settledIndex(root.scrollTop, root.clientHeight, items.length);
-      if (next !== null && next !== index) onIndexChange(next);
+      if (next !== null && next !== index) onIndexChange(next, startedAt ?? undefined);
     };
 
     const onScroll = () => {
-      if (supportsScrollEnd || scrollingFromProp.current) return;
+      if (scrollingFromProp.current) return;
+      gestureStartedAt.current ??= performance.now();
+      if (supportsScrollEnd) return;
       if (settleTimer !== null) window.clearTimeout(settleTimer);
       settleTimer = window.setTimeout(commit, SCROLL_SETTLE_FALLBACK_MS);
     };
@@ -164,6 +178,7 @@ export function FeedScroller({
             following={followingIds.has(item.seriesId)}
             seekToMs={active ? seekToMs : null}
             showPlayGate={showPlayGate}
+            failureHold={active ? failureHold : null}
             locale={locale}
             progressStore={progressStore}
             handlers={handlers}

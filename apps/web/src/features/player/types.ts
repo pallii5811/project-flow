@@ -23,9 +23,10 @@ export type PlayerAdapterEvents = {
   onEnded?: () => void;
   /**
    * The active episode cannot play: recovery was tried and failed.
-   * message is internal; mediaErrorCode maps to typed analytics.
+   * message is internal; mediaErrorCode maps to typed analytics. connection:
+   * the network or the no-progress watchdog failed, not the episode itself.
    */
-  onError?: (message: string, mediaErrorCode?: number | null) => void;
+  onError?: (message: string, mediaErrorCode?: number | null, connection?: boolean) => void;
   /** HTML `play`: playback was requested and is no longer paused (no frame yet). */
   onPlay?: () => void;
   /**

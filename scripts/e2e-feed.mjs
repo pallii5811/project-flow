@@ -29,7 +29,13 @@
  *  11. a returning viewer who finished an episode lands on the next one;
  *  12. going offline while the next episode warms, then back online, still
  *      plays it (or shows the error and skips);
- *  13. an episode that cannot load shows the error, then skips on its own.
+ *  13. an episode that cannot load shows the error, then skips on its own;
+ *  14. an episode glimpsed for a second is not where a returning viewer lands;
+ *  15. leaving an auto-continued episode in its first second reopens on it (Up next);
+ *  16. a playlist that answers 503 four times plays after the player's 1 s and 3 s retries;
+ *  17. sound refused without a gesture: the next episode plays muted and says so;
+ *  18. a network that is online but carries nothing: two error skips, then the
+ *      feed stops on "Connection problem" instead of running through the feed.
  */
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
@@ -130,6 +136,35 @@ function trackPage(page, label, consoleErrors, mediaRequests, posterRequests = [
       bytes: sizes ? sizes.responseBodySize : null,
     });
   });
+}
+
+/**
+ * Analytics envelopes the page logs (the export has no collector, so the
+ * console transport prints each one as "[analytics] <name>", envelope).
+ */
+function collectAnalytics(page) {
+  const events = [];
+  page.on("console", async (message) => {
+    const text = message.text();
+    if (!text.startsWith("[analytics] ")) return;
+    const name = text.slice("[analytics] ".length).split(" ")[0];
+    const envelope = await message.args()[1]?.jsonValue().catch(() => null);
+    events.push({ name, properties: envelope?.properties ?? null });
+  });
+  return events;
+}
+
+/** The active slide and the message it shows, if any. */
+function activeStatus() {
+  const active = document.querySelector('[data-active="true"]');
+  const video = active?.querySelector("video");
+  return {
+    active: active?.getAttribute("data-content-id") ?? null,
+    status: active?.querySelector('[role="status"]')?.textContent ?? null,
+    muted: video ? video.muted : null,
+    paused: video ? video.paused : null,
+    seconds: video ? Math.round(video.currentTime * 100) / 100 : null,
+  };
 }
 
 /** Slides in the feed list, and how many of them render a poster or a player. */
@@ -311,6 +346,7 @@ try {
   const feedPosters = [];
   const feed = await context.newPage();
   trackPage(feed, "feed", consoleErrors, feedMedia, feedPosters);
+  const feedEvents = collectAnalytics(feed);
   await feed.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
   await feed.waitForFunction(() => window.__flowPlaying.length > 0, null, {
     timeout: 10_000,
@@ -417,6 +453,18 @@ try {
       () => document.querySelector('[data-active="true"]')?.getAttribute("data-content-id") ?? null,
     );
     check(scrolled, `a scroll gesture did not move to item_signal_3 (on ${measured.scrollGestureMovedTo})`);
+    // Report only: from the first scroll event of the gesture, snap and
+    // settle included, to the first frame (docs/standard.md §3).
+    if (scrolled) {
+      await sleep(1_500);
+      const played = feedEvents.find(
+        (event) =>
+          event.name === "play" &&
+          event.properties?.content_id === "item_signal_3" &&
+          event.properties?.first_frame === true,
+      );
+      measured.scrollGestureSwipeToPlayMs = played?.properties?.swipe_to_play_ms ?? null;
+    }
   }
 
   // Swipe deep into the feed: the list must extend, media stays bounded.
@@ -745,6 +793,198 @@ try {
       `the playback error was visible only ${failure.errorVisibleForMs} ms before the skip`,
     );
     await brokenContext.close();
+  }
+
+  if (!SCALE) {
+    // 14: an episode glimpsed for a second is not where a returning viewer lands.
+    {
+      const glimpseContext = await phoneContext(browser, null);
+      const watching = await glimpseContext.newPage();
+      trackPage(watching, "glimpse", consoleErrors, []);
+      await watching.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await watching.waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 10_000 });
+      await sleep(4_000);
+      const glimpsed = await watching.evaluate(swipeAndWaitForPlaying, "item_signal_2");
+      await sleep(1_000);
+      const stored = await watching.evaluate(() =>
+        JSON.parse(window.localStorage.getItem("project-flow.resume.v2") ?? "null"),
+      );
+      await watching.close();
+      const returning = await glimpseContext.newPage();
+      trackPage(returning, "return after a glimpse", consoleErrors, []);
+      await returning.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await returning.waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 10_000 });
+      await sleep(2_500);
+      const reopened = await returning.evaluate(() => ({
+        firstPlayed: window.__flowPlaying[0]?.contentId ?? null,
+        active: document.querySelector('[data-active="true"]')?.getAttribute("data-content-id") ?? null,
+        strip: document.querySelector('[aria-label="Continue story"]')?.textContent ?? null,
+      }));
+      const savedEntry = Array.isArray(stored?.entries) ? stored.entries[0] : Array.isArray(stored) ? stored[0] : stored;
+      measured.returnAfterGlimpse = {
+        glimpsed: glimpsed !== null,
+        savedContentId: savedEntry?.contentId ?? null,
+        savedPositionMs: savedEntry?.positionMs ?? null,
+        ...reopened,
+      };
+      check(glimpsed !== null, "the glimpse check could not swipe to item_signal_2");
+      check(
+        reopened.firstPlayed === "item_signal_1" && reopened.active === "item_signal_1" && reopened.strip === null,
+        `after glimpsing item_signal_2 for 1 s the viewer reopened on ${reopened.active} (strip: ${reopened.strip}), not the top of the feed without a strip`,
+      );
+      await glimpseContext.close();
+    }
+
+    // 15: leaving an auto-continued episode in its first second still reopens on it.
+    {
+      const continuedContext = await phoneContext(browser, null);
+      const watching = await continuedContext.newPage();
+      trackPage(watching, "auto-continue then leave", consoleErrors, []);
+      await watching.goto(`${BASE}/watch/signal-night/episode-2`, { waitUntil: "domcontentloaded" });
+      const continuedTo3 = await watching
+        .waitForFunction(
+          () => window.__flowPlaying.some((entry) => entry.contentId === "item_signal_3"),
+          null,
+          { timeout: 25_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      await sleep(800);
+      await watching.close();
+      const returning = await continuedContext.newPage();
+      trackPage(returning, "return after auto-continue", consoleErrors, []);
+      await returning.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      const landed = await returning
+        .waitForFunction(
+          () =>
+            window.__flowPlaying[0]?.contentId === "item_signal_3" &&
+            document.querySelector('[aria-label="Continue story"]') !== null,
+          null,
+          { timeout: 10_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      const state = await returning.evaluate(() => ({
+        firstPlayed: window.__flowPlaying[0]?.contentId ?? null,
+        strip: document.querySelector('[aria-label="Continue story"]')?.textContent ?? null,
+      }));
+      measured.returnAfterAutoContinue = { continuedTo3, landed, ...state };
+      check(
+        continuedTo3 && landed && state.strip?.startsWith("Up next") === true,
+        `leaving episode 3 right after auto-continue reopened on ${state.firstPlayed} (strip: ${state.strip}), not episode 3 with Up next`,
+      );
+      await continuedContext.close();
+    }
+
+    // 16: a playlist that answers 503 four times plays once it answers: the
+    // player's own retries (1 s, then 3 s) run after hls.js gives up.
+    {
+      const flakyContext = await phoneContext(browser, null);
+      const page = await flakyContext.newPage();
+      page.on("pageerror", (error) => consoleErrors.push(`flaky playlist: ${error.message}`));
+      const answers = [];
+      const start = Date.now();
+      await page.route("**/hls/episode-1/master.m3u8", async (route) => {
+        const failing = answers.filter((answer) => answer.status === 503).length < 4;
+        answers.push({ status: failing ? 503 : 200, at: Date.now() - start });
+        if (failing) await route.fulfill({ status: 503, body: "busy" });
+        else await route.continue();
+      });
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      const played = await page
+        .waitForFunction(
+          () => window.__flowPlaying.some((entry) => entry.contentId === "item_signal_1"),
+          null,
+          { timeout: 25_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      const playingAt = played ? Date.now() - start : null;
+      const statusSeen = await page.evaluate(activeStatus);
+      const gaps = answers.slice(1).map((answer, i) => answer.at - answers[i].at);
+      measured.flakyPlaylist = { answers, gapsMs: gaps, playingAt, status: statusSeen.status };
+      check(
+        played && answers.filter((answer) => answer.status === 503).length === 4,
+        `a playlist that answered 503 four times did not play afterwards: ${JSON.stringify(measured.flakyPlaylist)}`,
+      );
+      check(
+        gaps.some((gap) => gap >= 2_500),
+        `the 3 s player retry never ran before the playlist was served: gaps ${gaps.join(", ")} ms`,
+      );
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+      await flakyContext.close();
+    }
+
+    // 17: sound refused without a gesture: the next episode plays muted.
+    {
+      const soundContext = await phoneContext(browser, null);
+      await soundContext.addInitScript(installPhoneAutoplayRule);
+      const page = await soundContext.newPage();
+      trackPage(page, "muted fallback", consoleErrors, []);
+      const events = collectAnalytics(page);
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 10_000 });
+      // An untrusted key: the app turns sound on, the page has no gesture.
+      await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "m" })));
+      await sleep(300);
+      const next = await page.evaluate(swipeAndWaitForPlaying, "item_signal_2");
+      await sleep(1_000);
+      const state = await page.evaluate(activeStatus);
+      const fallback = events.some((event) => event.name === "autoplay_muted_fallback");
+      measured.mutedFallback = { playedNext: next !== null, fallbackEvent: fallback, ...state };
+      check(
+        next !== null && state.active === "item_signal_2" && state.muted === true && state.paused === false,
+        `with sound refused, the next episode did not play muted: ${JSON.stringify(measured.mutedFallback)}`,
+      );
+      check(fallback, "autoplay_muted_fallback was not sent when sound was refused");
+      await soundContext.close();
+    }
+
+    // 18: a network that is "online" but carries nothing. Each episode shows
+    // its error after the watchdog (10 s, re-attach, 10 s), the feed skips two
+    // of them, then stops and waits for the viewer instead of running on.
+    {
+      const deadContext = await phoneContext(browser, null);
+      const page = await deadContext.newPage();
+      page.on("pageerror", (error) => consoleErrors.push(`dead network: ${error.message}`));
+      await page.route("**/hls/**", () => {
+        // Never answered.
+      });
+      const start = Date.now();
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      const timeline = [];
+      let last = "";
+      let heldAt = null;
+      while (Date.now() - start < 110_000) {
+        const state = await page.evaluate(activeStatus);
+        const key = `${state.active}|${state.status ?? ""}`;
+        if (key !== last) {
+          last = key;
+          timeline.push({ at: Date.now() - start, active: state.active, status: state.status });
+        }
+        if (heldAt === null && state.status?.includes("Connection problem")) heldAt = Date.now();
+        if (heldAt !== null && Date.now() - heldAt >= 7_000) break;
+        await sleep(250);
+      }
+      const final = await page.evaluate(activeStatus);
+      const firstError = timeline.find((entry) => entry.status !== null);
+      const skippedTo = [...new Set(timeline.map((entry) => entry.active))];
+      measured.deadNetwork = { timeline, final };
+      check(
+        firstError !== undefined && firstError.at >= 15_000 && firstError.at <= 30_000,
+        `with no data the first error was not shown after the watchdog (about 20 s): ${JSON.stringify(timeline)}`,
+      );
+      check(
+        skippedTo.length === 3,
+        `with no data the feed did not skip exactly two episodes before waiting: ${JSON.stringify(timeline)}`,
+      );
+      check(
+        heldAt !== null && final.status?.includes("Connection problem") === true && final.active === skippedTo[2],
+        `with no data the feed did not stop on a connection problem: ${JSON.stringify(final)}`,
+      );
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+      await deadContext.close();
+    }
   }
 
   // 6: unknown episode.

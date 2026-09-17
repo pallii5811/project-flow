@@ -16,6 +16,7 @@ import type { PlayingInfo } from "@/features/player/types";
 import { ActionRail } from "./ActionRail";
 import { ContentOverlay } from "./ContentOverlay";
 import { PlayGate } from "./PlayGate";
+import type { FailureHold } from "./feedLogic";
 import type { ProgressStore } from "./progressStore";
 import styles from "./feed.module.css";
 
@@ -42,8 +43,11 @@ export type FeedItemHandlers = {
   onMetadataReady: (item: ContentItem) => void;
   onTimeUpdate: (item: ContentItem, positionMs: number, durationMs: number) => void;
   onEnded: (item: ContentItem) => void;
-  /** The active episode cannot play. The feed skips it after a readable delay. */
-  onError: (item: ContentItem, code: string, reason: string) => void;
+  /**
+   * The active episode cannot play. The feed skips it after a readable delay.
+   * `connection`: the network or the no-progress watchdog failed, not the episode.
+   */
+  onError: (item: ContentItem, code: string, reason: string, connection: boolean) => void;
   /** The viewer asked to try a failed episode again. */
   onRetry: (item: ContentItem) => void;
   onPlay: (item: ContentItem) => void;
@@ -67,6 +71,8 @@ type FeedItemViewProps = {
   following: boolean;
   seekToMs: number | null;
   showPlayGate: boolean;
+  /** Why this failed episode waits for the viewer instead of skipping. */
+  failureHold?: FailureHold | null;
   locale?: string | null | undefined;
   progressStore: ProgressStore;
   handlers: FeedItemHandlers;
@@ -82,6 +88,7 @@ function FeedItemViewImpl({
   following,
   seekToMs,
   showPlayGate,
+  failureHold = null,
   locale,
   progressStore,
   handlers,
@@ -129,7 +136,7 @@ function FeedItemViewImpl({
   useEffect(() => {
     if (!active || resolved.ok) return;
     setFailed(true);
-    handlers.onError(item, resolved.error.code, resolved.error.reason);
+    handlers.onError(item, resolved.error.code, resolved.error.reason, false);
     logContentEvent({
       event: "playback_failed",
       contentId: item.id,
@@ -142,11 +149,17 @@ function FeedItemViewImpl({
   failedRef.current = failed;
   const resolvableRef = useRef(resolved.ok);
   resolvableRef.current = resolved.ok;
+  const itemRef = useRef(item);
+  itemRef.current = item;
 
-  /** A failed but resolvable episode gets a fresh player (PB-5). */
+  /**
+   * A failed but resolvable episode gets a fresh player (PB-5). The feed is
+   * told, as for Try again, so its pending skip cannot fire on the new try.
+   */
   const retryIfFailed = () => {
     setOffline(false);
     if (!failedRef.current || !resolvableRef.current) return;
+    handlers.onRetry(itemRef.current);
     setFailed(false);
     setPlaying(false);
     setAttempt((count) => count + 1);
@@ -243,12 +256,12 @@ function FeedItemViewImpl({
                 setPlaying(false);
                 handlers.onEnded(item);
               },
-              onError: (_message, mediaCode) => {
+              onError: (_message, mediaCode, connection) => {
                 if (!active) return;
                 const classified = classifyMediaError(mediaCode);
                 setFailed(true);
                 setPlaying(false);
-                handlers.onError(item, classified.code, classified.reason);
+                handlers.onError(item, classified.code, classified.reason, connection === true);
               },
               onPlay: () => handlers.onPlay(item),
               onPlaying: (info) => {
@@ -299,7 +312,11 @@ function FeedItemViewImpl({
       {active && failed ? (
         <div className={styles.mediaFail} role="status">
           <p className={styles.mediaFailText}>
-            This episode couldn’t play. Moving to the next one…
+            {failureHold === "connection"
+              ? "Connection problem: episodes aren’t loading. Try again when your connection is back."
+              : failureHold === "end"
+                ? "This episode couldn’t play."
+                : "This episode couldn’t play. Moving to the next one…"}
           </p>
           {resolved.ok ? (
             <button type="button" className={styles.mediaFailRetry} onClick={handleRetry}>

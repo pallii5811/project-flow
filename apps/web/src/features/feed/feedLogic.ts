@@ -37,6 +37,38 @@ export function buildShareUrl(
 export const ERROR_SKIP_DELAY_MS = 2_500;
 
 /**
+ * Connection failures skipped in a row, with no episode playing in between,
+ * before the feed stops moving on by itself. A network that is "online" but
+ * carries no data would otherwise run through the whole feed, one episode
+ * every twenty seconds (the same outcome the offline rule avoids).
+ */
+export const CONNECTION_SKIP_LIMIT = 2;
+
+/**
+ * Why a failed episode waits on screen instead of skipping:
+ * connection: several episodes in a row could not reach the network;
+ * end: nothing is left after it in the catalog.
+ */
+export type FailureHold = "connection" | "end";
+
+export type PlaybackFailure = {
+  contentId: string;
+  /** The network or the no-progress watchdog failed, not the episode itself. */
+  connection: boolean;
+  hold: FailureHold | null;
+};
+
+/** The hold for a new failure, before any skip is scheduled. */
+export function failureHoldFor(connection: boolean, consecutiveConnectionSkips: number): FailureHold | null {
+  return connection && consecutiveConnectionSkips >= CONNECTION_SKIP_LIMIT ? "connection" : null;
+}
+
+/** Every episode of the full catalog is already listed: the feed cannot grow. */
+export function feedExhausted(catalogComplete: boolean, catalogSize: number, listed: number): boolean {
+  return catalogComplete && listed >= catalogSize;
+}
+
+/**
  * Slide the scroller rests on once scrolling settled (PB-6), or null for an
  * empty feed. Read only when the gesture is over, never mid-swipe.
  */

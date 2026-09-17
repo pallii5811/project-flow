@@ -10,8 +10,11 @@ import {
 } from "@project-flow/feed-domain";
 
 import {
+  CONNECTION_SKIP_LIMIT,
   ERROR_SKIP_DELAY_MS,
   buildShareUrl,
+  failureHoldFor,
+  feedExhausted,
   firstPlayStartMode,
   isAtSlide,
   settledIndex,
@@ -123,5 +126,25 @@ describe("first play start mode (MP-2)", () => {
 
   it("the error stays readable before the skip", () => {
     expect(ERROR_SKIP_DELAY_MS).toBeGreaterThanOrEqual(1_500);
+  });
+});
+
+describe("failed episodes that wait instead of skipping", () => {
+  it("connection failures skip at first, then wait for the viewer", () => {
+    expect(CONNECTION_SKIP_LIMIT).toBe(2);
+    expect(failureHoldFor(true, 0)).toBeNull();
+    expect(failureHoldFor(true, 1)).toBeNull();
+    expect(failureHoldFor(true, CONNECTION_SKIP_LIMIT)).toBe("connection");
+  });
+
+  it("an episode that failed on its own always skips", () => {
+    expect(failureHoldFor(false, 9)).toBeNull();
+  });
+
+  it("the feed is exhausted only when the full catalog is all listed", () => {
+    expect(feedExhausted(true, 12, 12)).toBe(true);
+    expect(feedExhausted(true, 12, 11)).toBe(false);
+    // The first-frame catalog is not the catalog: the page can still grow.
+    expect(feedExhausted(false, 2, 2)).toBe(false);
   });
 });

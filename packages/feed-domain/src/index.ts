@@ -93,6 +93,7 @@ export {
   createMemoryResumeStore,
   isNearEnd,
   isResumable,
+  keepsFinishedEpisode,
   resumeLanding,
   shouldPersistResume,
   upsertResumeEntry,

@@ -12,13 +12,15 @@ Format: date · decision · why · consequences · revisit when.
 - while the browser is offline it spends no retries: it shows "You're offline" and attaches again on the `online` event;
 - a slide whose source died while it was only warming is attached again when it becomes active;
 - a watchdog re-attaches an active episode that is not playing and has received no media for 10 s, then fails it. It counts from the last playlist, segment or frame, so a slow phone that keeps receiving data is never cut off;
-- a failed episode shows "This episode couldn't play" with Try again for 2.5 s, then the feed moves to the next episode of the series (or the next slide). Only the episode on screen can move the feed. Coming back to a failed episode, or the network returning, tries it again.
+- a failed episode shows "This episode couldn't play" with Try again for 2.5 s, then the feed moves to the next episode of the series (or the next slide). Only the episode on screen can move the feed. Coming back to a failed episode, or the network returning, tries it again, and cancels the pending skip as Try again does. On the last listed slide the skip waits for the page to grow; with the whole catalog listed the error stays, without "Moving to the next one";
+- after two connection failures skipped in a row (retries spent, or the watchdog) with nothing played in between, the next one does not skip: it shows "Connection problem" with Try again. A network that is online but carries no data would otherwise run through the whole feed, one episode every 22 s;
+- a retry or a watchdog re-attach is given back once playback has moved 4 s past the point it recovered from, so a later stall in the same episode gets its own recovery, while a source failing again at the same point still runs out.
 
 Sound: every visit starts muted, whatever was saved; a `play()` refused because sound needs a gesture retries muted.
 
-Resume: one point per series (`project-flow.resume.v2`, 20 series at most, the old single key is read and migrated). The home page lands on the most recent one: at the saved position, or on the next episode of the series when the saved one was finished or over 92% watched. A shared link reads only its own series.
+Resume: one point per series (`project-flow.resume.v2`, 20 series at most, the old single key is read and migrated). The home page lands on the most recent one: at the saved position, or on the next episode of the series when the saved one was finished or over 92% watched. A saved position under 2 s is not a landing (most often the viewer swiped the episode away), and it never replaces a finished episode of the same series, so leaving an auto-continued episode in its first seconds still reopens on it as "Up next". A shared link reads only its own series.
 
-Metrics: `first_meaningful_play` and `play` are sent at the first frame on screen (`requestVideoFrameCallback`, else `playing`), never at `play()`. `first_meaningful_play` carries `start_mode` (autoplay, play_gate, resume), `autoplay_blocked` and `gate_tap_to_play_ms`; `play` carries `swipe_to_play_ms`. Waiting before the first frame is not `buffer_start`. `series_complete` is sent only when the series' last episode ends or is left at 95% watched; an episode whose successor is missing sends `series_unavailable_next`. Content events carry `episode_number` and `episode_count`, and every event's `app_version` is the git commit of the build.
+Metrics: `first_meaningful_play` and `play` are sent at the first frame on screen (`requestVideoFrameCallback`, else `playing`), never at `play()`. `first_meaningful_play` carries `start_mode` (autoplay, play_gate, resume; resume only when the landing moved the feed), `autoplay_blocked` and `gate_tap_to_play_ms`; `play` carries `swipe_to_play_ms`. Waiting before the first frame is not `buffer_start`. `series_complete` is sent only when the series' last episode ends or is left at 95% watched; an episode whose successor is missing sends `series_unavailable_next`. Content events carry `episode_number` and `episode_count`, and every event's `app_version` is the git commit of the build.
 
 The scroller commits the active slide at `scrollend` (a 150 ms quiet period where the event does not exist), not at the halfway mark mid-gesture.
 
@@ -27,7 +29,7 @@ The scroller commits the active slide at `scrollend` (a 150 ms quiet period wher
 **Consequences:**
 
 - While offline an episode waits instead of skipping: skipping would run through the whole feed with nothing able to play.
-- The active slide changes when a swipe settles, so on a phone playback starts after the snap animation; `swipe_to_play_ms` is measured from that commit, not from the finger.
+- The active slide changes when a swipe settles, so on a phone playback starts after the snap animation; `swipe_to_play_ms` counts from the first scroll event of the gesture, so the snap and the settle wait are inside the < 300 ms target.
 - A returning viewer whose saved episode is not in the first frame waits for `catalog/feed.json` before the landing episode plays (as a resumed episode already did).
 - `scripts/link-hls-engine.mjs` warns instead of failing when no exported page opens on an HLS episode; it still fails when a page carries the warmup script and cannot be linked.
 - First-load JavaScript 127 → 130 kB.

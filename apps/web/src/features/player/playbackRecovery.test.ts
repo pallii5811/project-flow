@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   NETWORK_RETRY_DELAYS_MS,
   decideFatalRecovery,
+  RECOVERY_CONFIRM_SECONDS,
   decideWatchdog,
   reattachPosition,
+  recoveryConfirmed,
   seekTarget,
   shouldFallBackToMuted,
 } from "./playbackRecovery";
@@ -23,7 +25,7 @@ describe("decideFatalRecovery (PB-1)", () => {
     });
     expect(
       decideFatalRecovery({ ...network, networkRetries: NETWORK_RETRY_DELAYS_MS.length }),
-    ).toEqual({ action: "fail", mediaErrorCode: 2 });
+    ).toEqual({ action: "fail", mediaErrorCode: 2, connection: true });
   });
 
   it("waits for the network instead of spending retries while offline", () => {
@@ -36,6 +38,7 @@ describe("decideFatalRecovery (PB-1)", () => {
     expect(decideFatalRecovery({ ...network, httpStatus: 404 })).toEqual({
       action: "fail",
       mediaErrorCode: 2,
+      connection: false,
     });
     expect(decideFatalRecovery({ ...network, httpStatus: 429 }).action).toBe("retry");
     expect(decideFatalRecovery({ ...network, httpStatus: 503 }).action).toBe("retry");
@@ -47,6 +50,7 @@ describe("decideFatalRecovery (PB-1)", () => {
     expect(decideFatalRecovery({ ...media, mediaRecoveries: 1 })).toEqual({
       action: "fail",
       mediaErrorCode: 3,
+      connection: false,
     });
   });
 });
@@ -68,6 +72,18 @@ describe("decideWatchdog", () => {
     expect(decideWatchdog({ online: false, reattached: true, waitingForViewer: false })).toBe(
       "wait_online",
     );
+  });
+});
+
+describe("recoveryConfirmed (a second stall gets its own recovery)", () => {
+  it("gives the recovery back only after real playback past the recovery point", () => {
+    expect(recoveryConfirmed(60, 60 + RECOVERY_CONFIRM_SECONDS)).toBe(true);
+    expect(recoveryConfirmed(60, 61)).toBe(false);
+  });
+
+  it("a source failing again at the same point never confirms", () => {
+    expect(recoveryConfirmed(59.75, 60)).toBe(false);
+    expect(recoveryConfirmed(Number.NaN, 90)).toBe(false);
   });
 });
 

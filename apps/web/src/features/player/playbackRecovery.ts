@@ -37,8 +37,11 @@ export type RecoveryAction =
   | { action: "wait_online" }
   /** hls.js recoverMediaError(). */
   | { action: "recover_media" }
-  /** Give up: an active episode shows its error. */
-  | { action: "fail"; mediaErrorCode: 2 | 3 | 4 };
+  /**
+   * Give up: an active episode shows its error. `connection`: the network kept
+   * failing (retries spent), as opposed to an answer about the episode itself.
+   */
+  | { action: "fail"; mediaErrorCode: 2 | 3 | 4; connection: boolean };
 
 /**
  * A request that answered 4xx will answer the same again: fail at once. A
@@ -49,17 +52,17 @@ export function decideFatalRecovery(input: FatalErrorInput): RecoveryAction {
   if (input.kind === "media") {
     return input.mediaRecoveries < 1
       ? { action: "recover_media" }
-      : { action: "fail", mediaErrorCode: 3 };
+      : { action: "fail", mediaErrorCode: 3, connection: false };
   }
-  if (input.kind === "other") return { action: "fail", mediaErrorCode: 4 };
+  if (input.kind === "other") return { action: "fail", mediaErrorCode: 4, connection: false };
   const status = input.httpStatus ?? 0;
   if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
-    return { action: "fail", mediaErrorCode: 2 };
+    return { action: "fail", mediaErrorCode: 2, connection: false };
   }
   if (!input.online) return { action: "wait_online" };
   const delayMs = NETWORK_RETRY_DELAYS_MS[input.networkRetries];
   return delayMs === undefined
-    ? { action: "fail", mediaErrorCode: 2 }
+    ? { action: "fail", mediaErrorCode: 2, connection: true }
     : { action: "retry", delayMs };
 }
 
@@ -77,6 +80,20 @@ export function decideWatchdog(input: WatchdogInput): WatchdogAction {
   if (input.waitingForViewer) return "ignore";
   if (!input.online) return "wait_online";
   return input.reattached ? "fail" : "reattach";
+}
+
+/**
+ * Seconds of real playback after a recovery that prove it worked. Only then
+ * are the retries and the watchdog re-attach given back, so a later,
+ * unrelated stall in the same episode gets its own recovery, while a source
+ * that fails again at the same point still runs out of retries.
+ */
+export const RECOVERY_CONFIRM_SECONDS = 4;
+
+/** Playback moved far enough past the point it recovered from. */
+export function recoveryConfirmed(recoveredFromSeconds: number, currentTimeSeconds: number): boolean {
+  if (!Number.isFinite(recoveredFromSeconds) || !Number.isFinite(currentTimeSeconds)) return false;
+  return currentTimeSeconds - recoveredFromSeconds >= RECOVERY_CONFIRM_SECONDS;
 }
 
 /**

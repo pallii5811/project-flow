@@ -17,6 +17,7 @@ import {
   getPrefetchIds,
   isNearEnd,
   isResumable,
+  keepsFinishedEpisode,
   materializeFeedItems,
   needsExtension,
   pageStartingAt,
@@ -69,8 +70,11 @@ import { SeriesEnd } from "./SeriesEnd";
 import {
   ERROR_SKIP_DELAY_MS,
   buildShareUrl,
+  failureHoldFor,
+  feedExhausted,
   firstPlayStartMode,
   shouldShowPlayGate,
+  type PlaybackFailure,
 } from "./feedLogic";
 import { createProgressStore, createStableHandlers } from "./progressStore";
 import styles from "./feed.module.css";
@@ -195,7 +199,11 @@ export function FeedApp({
   const [seriesEnded, setSeriesEnded] = useState<SeriesEndKind | null>(null);
   const [resumeOffer, setResumeOffer] = useState<ResumeLanding | null>(null);
   /** The active episode failed; the feed moves on after ERROR_SKIP_DELAY_MS (PB-5). */
-  const [playbackFailure, setPlaybackFailure] = useState<string | null>(null);
+  const [playbackFailure, setPlaybackFailure] = useState<PlaybackFailure | null>(null);
+  /** Connection failures skipped since an episode last played (CONNECTION_SKIP_LIMIT). */
+  const connectionSkipsRef = useRef(0);
+  /** A failed last slide waits for the page to grow before skipping. */
+  const pendingSkipRef = useRef<string | null>(null);
 
   const resumeStore = useMemo(() => createLocalStorageResumeStore(), []);
   const progressThrottle = useMemo(() => createWatchProgressThrottle(5_000), []);
@@ -448,7 +456,7 @@ export function FeedApp({
         lastResumeRef.current = saved;
         setCaptionsOn(saved.captionsOn);
         if (saved.contentId === initialContentId && isResumable(saved)) {
-          resumeLandingId.current = saved.contentId;
+          // No move and no seek yet: the first play stays an autoplay (MP-2).
           setResumeOffer({ contentId: saved.contentId, positionMs: saved.positionMs, reason: "resume" });
           patchLaunchDiagnostics({ resumePositionMs: saved.positionMs });
         }
@@ -485,8 +493,12 @@ export function FeedApp({
 
       const listed = itemsRef.current.findIndex((item) => item.id === target.contentId);
       if (listed >= 0) {
+        // Landing on the slide already on screen is not a move: its first
+        // play stays an autoplay and counts toward the first-play target (MP-2).
+        if (listed !== indexRef.current) resumeLandingId.current = target.contentId;
         setIndex(listed);
       } else {
+        resumeLandingId.current = target.contentId;
         // The page holds only the first frame: the episode comes from the
         // catalog and opens a page of its own.
         const landed = data.ordered.find((item) => item.id === target.contentId);
@@ -494,7 +506,6 @@ export function FeedApp({
         setItems((prev) => pageStartingAt(data.source, landed, prev));
         setIndex(0);
       }
-      resumeLandingId.current = target.contentId;
       setResumeOffer(target);
       patchLaunchDiagnostics({ resumePositionMs: target.positionMs });
     })();
@@ -586,6 +597,8 @@ export function FeedApp({
   const persistResume = useCallback(
     async (snapshot: ResumeSnapshot) => {
       if (!shouldPersistResume(lastResumeRef.current, snapshot)) return;
+      // The first seconds after a finished episode do not replace it (VIR-1).
+      if (keepsFinishedEpisode(lastResumeRef.current, snapshot)) return;
       lastResumeRef.current = snapshot;
       await resumeStore.save(snapshot);
     },
@@ -640,7 +653,12 @@ export function FeedApp({
   );
 
   const handleIndexChange = useCallback(
-    (next: number, kind: PendingTransition["kind"] = "swipe", nextItems: ContentItem[] = items) => {
+    (
+      next: number,
+      kind: PendingTransition["kind"] = "swipe",
+      nextItems: ContentItem[] = items,
+      gestureStartedAt?: number,
+    ) => {
       if (next === index) return;
       const from = items[index];
       if (from) {
@@ -695,7 +713,7 @@ export function FeedApp({
       }
       perf.mark("episode_transition_started");
       transitionRef.current = to
-        ? { toContentId: to.id, kind, startedAt: performance.now() }
+        ? { toContentId: to.id, kind, startedAt: gestureStartedAt ?? performance.now() }
         : null;
       setSeriesEnded(null);
       setResumeOffer(null);
@@ -718,38 +736,74 @@ export function FeedApp({
     ],
   );
 
+  /** A swipe (scroll gesture or key): latency counts from the gesture's start. */
+  const handleScrollerIndexChange = useCallback(
+    (next: number, gestureStartedAt?: number) =>
+      handleIndexChange(next, "swipe", items, gestureStartedAt),
+    [handleIndexChange, items],
+  );
+
   // A failed episode stays on screen long enough to read why, then the feed
   // moves on: to the next episode of the series when there is one (PB-5).
-  const skipFailedRef = useRef<(contentId: string) => void>(() => undefined);
-  skipFailedRef.current = (contentId: string) => {
+  const skipFailedRef = useRef<(failure: PlaybackFailure) => void>(() => undefined);
+  skipFailedRef.current = (failure: PlaybackFailure) => {
     const active = items[index];
-    if (!active || active.id !== contentId) return;
-    analytics.track("playback_error_skip", {
-      content_id: active.id,
-      series_id: active.seriesId,
-      episode_id: active.episodeId,
-    });
+    if (!active || active.id !== failure.contentId) return;
+    const moveOn = (target: () => void) => {
+      analytics.track("playback_error_skip", {
+        content_id: active.id,
+        series_id: active.seriesId,
+        episode_id: active.episodeId,
+      });
+      if (failure.connection) connectionSkipsRef.current += 1;
+      pendingSkipRef.current = null;
+      target();
+    };
     const placed = placeNextInSeries(feedRef.current.source, items, index);
     if (placed.kind === "next_in_series") {
-      handleIndexChange(placed.nextIndex, "error_skip", placed.items);
+      moveOn(() => handleIndexChange(placed.nextIndex, "error_skip", placed.items));
       return;
     }
     if (index < items.length - 1) {
-      handleIndexChange(index + 1, "error_skip");
+      moveOn(() => handleIndexChange(index + 1, "error_skip"));
       return;
     }
-    // Last listed slide: build the page, the extension effect adds slides.
-    setPlaybackFailure(null);
+    // Last listed slide: the error stays up while the page is built, and the
+    // skip happens as soon as a slide exists after it.
+    if (feedExhausted(feedRef.current.complete, feedRef.current.ordered.length, items.length)) {
+      pendingSkipRef.current = null;
+      setPlaybackFailure({ ...failure, hold: "end" });
+      return;
+    }
+    pendingSkipRef.current = failure.contentId;
     void ensureFeedPage();
   };
   useEffect(() => {
-    if (!playbackFailure || current?.id !== playbackFailure) return;
-    const timer = window.setTimeout(
-      () => skipFailedRef.current(playbackFailure),
-      ERROR_SKIP_DELAY_MS,
-    );
+    if (!playbackFailure || playbackFailure.hold || current?.id !== playbackFailure.contentId) {
+      return;
+    }
+    const failure = playbackFailure;
+    const timer = window.setTimeout(() => skipFailedRef.current(failure), ERROR_SKIP_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [current?.id, playbackFailure]);
+  // A skip that waited at the last slide runs once the page has grown, or
+  // settles on a visible end when the catalog has nothing more.
+  useEffect(() => {
+    const pending = pendingSkipRef.current;
+    if (
+      !pending ||
+      !playbackFailure ||
+      playbackFailure.hold ||
+      playbackFailure.contentId !== pending
+    ) {
+      return;
+    }
+    if (current?.id !== pending) {
+      pendingSkipRef.current = null;
+      return;
+    }
+    if (index < items.length - 1 || pageReady) skipFailedRef.current(playbackFailure);
+  }, [current?.id, feed.complete, index, items.length, pageReady, playbackFailure]);
 
   const handleTimeUpdate = (item: ContentItem, positionMs: number, durationMs: number) => {
     progressStore.set(item.id, durationMs > 0 ? positionMs / durationMs : 0);
@@ -1058,7 +1112,8 @@ export function FeedApp({
     },
     onTimeUpdate: handleTimeUpdate,
     onEnded: handleEnded,
-    onError: (item, code, reason) => {
+    onError: (item, code, reason, connection) => {
+      const hold = failureHoldFor(connection, connectionSkipsRef.current);
       analytics.track("playback_error", {
         session_id: sessionId,
         content_id: item.id,
@@ -1066,12 +1121,16 @@ export function FeedApp({
         episode_id: item.episodeId,
         error_code: code,
         reason,
+        connection,
+        held: hold !== null,
       });
       // Only the episode on screen moves the feed; a neighbour never does
-      // (PB-4, R3). The skip waits until the error has been read (PB-5).
+      // (PB-4, R3). The skip waits until the error has been read (PB-5); after
+      // several connection failures in a row it waits for the viewer instead.
       if (item.id !== current?.id) return;
       scheduleFeedPage();
-      setPlaybackFailure(item.id);
+      pendingSkipRef.current = null;
+      setPlaybackFailure({ contentId: item.id, connection, hold });
     },
     onRetry: (item) => {
       analytics.track("playback_retry", {
@@ -1079,7 +1138,9 @@ export function FeedApp({
         series_id: item.seriesId,
         episode_id: item.episodeId,
       });
-      setPlaybackFailure(null);
+      // A neighbour retried by the online event never clears the failure on screen.
+      if (pendingSkipRef.current === item.id) pendingSkipRef.current = null;
+      setPlaybackFailure((failure) => (failure?.contentId === item.id ? null : failure));
     },
     onPlayAttempt: (item) => {
       patchLaunchDiagnostics({
@@ -1124,6 +1185,8 @@ export function FeedApp({
         sourceUri: item.videoUrl,
       });
       if (info.firstFrame) perf.mark("episode_first_frame_played");
+      // An episode plays: the connection works, skipping is allowed again.
+      connectionSkipsRef.current = 0;
       if (info.firstFrame && !firstPlayMarked.current) {
         firstPlayMarked.current = true;
         perf.mark("video_play_started");
@@ -1242,13 +1305,18 @@ export function FeedApp({
         <FeedScroller
           items={items}
           index={index}
-          onIndexChange={handleIndexChange}
+          onIndexChange={handleScrollerIndexChange}
           muted={muted}
           captionsOn={captionsOn}
           likedIds={likedIds}
           followingIds={followingIds}
           seekToMs={seekToMs}
           showPlayGate={showGate}
+          failureHold={
+            playbackFailure && playbackFailure.contentId === current?.id
+              ? playbackFailure.hold
+              : null
+          }
           prefetchIds={prefetchIds}
           locale={locale}
           progressStore={progressStore}

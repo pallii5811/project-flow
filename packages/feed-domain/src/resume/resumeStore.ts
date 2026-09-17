@@ -103,22 +103,39 @@ export function isNearEnd(snapshot: ResumeSnapshot): boolean {
   return snapshot.positionMs / snapshot.durationMs > 0.92;
 }
 
+/**
+ * Whether `next` should replace `previous` as the resume point. A barely
+ * started episode of the same series never replaces an episode the viewer
+ * finished: the finished one already sends a returning viewer to the next
+ * episode (VIR-1). Leaving an auto-continued episode within its first seconds
+ * therefore still reopens on it, while a glimpse of any other episode stays
+ * what it was before: not a place to return to.
+ */
+export function keepsFinishedEpisode(
+  previous: ResumeSnapshot | null,
+  next: ResumeSnapshot,
+): boolean {
+  if (!previous || next.completed) return false;
+  if (previous.seriesId !== next.seriesId || previous.contentId === next.contentId) return false;
+  return isNearEnd(previous) && next.positionMs < RESUME_MIN_POSITION_MS;
+}
+
 export type ResumeLanding = {
   contentId: string;
   /** Where Continue seeks; 0 means the episode starts from the beginning. */
   positionMs: number;
   /**
    * resume: the saved episode at its saved position;
-   * next_episode: the saved one was finished, so the next one of the series;
-   * restart: the saved episode had barely started.
+   * next_episode: the saved one was finished, so the next one of the series.
    */
-  reason: "resume" | "next_episode" | "restart";
+  reason: "resume" | "next_episode";
 };
 
 /**
  * Where a returning viewer lands (VIR-1). A finished episode sends them to the
  * next one of that series instead of the top of the feed; a series watched to
- * its last episode has nothing to continue.
+ * its last episode has nothing to continue, and a barely started episode is
+ * not a place to return to (the viewer most often swiped it away).
  */
 export function resumeLanding(
   snapshot: ResumeSnapshot | null,
@@ -129,8 +146,6 @@ export function resumeLanding(
     const next = nextEpisodeId(snapshot.contentId);
     return next ? { contentId: next, positionMs: 0, reason: "next_episode" } : null;
   }
-  if (snapshot.positionMs < RESUME_MIN_POSITION_MS) {
-    return { contentId: snapshot.contentId, positionMs: 0, reason: "restart" };
-  }
+  if (!isResumable(snapshot)) return null;
   return { contentId: snapshot.contentId, positionMs: snapshot.positionMs, reason: "resume" };
 }
