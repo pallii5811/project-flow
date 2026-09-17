@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, ReactElement } from "react";
+import { useState, type CSSProperties, type ReactElement } from "react";
 
 import styles from "./feed.module.css";
 
@@ -67,7 +67,12 @@ export function NoticePill({
   const announced = notice && notice.kind !== "sound" ? notice : null;
   return (
     <>
-      <div className={styles.noticeLive} role="status" aria-live="polite" aria-atomic="true">
+      <div
+        className={styles.noticeLive}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {announced ? (
           <span key={announced.id} className={styles.visuallyHidden}>
             {announced.text}
@@ -75,21 +80,51 @@ export function NoticePill({
         ) : null}
       </div>
       {notice ? (
-        <div
-          key={notice.id}
-          className={`${styles.notice}${notice.detail ? ` ${styles.noticeWithDetail}` : ""}`}
-          data-notice={notice.kind}
-          style={{ "--notice-ms": `${durationMs}ms` } as CSSProperties}
-          aria-hidden="true"
-        >
-          <span className={styles.noticeRow}>
-            {notice.kind === "sound" ? <SpeakerGlyph /> : null}
-            {notice.kind === "share_copied" ? <CheckGlyph /> : null}
-            <span>{notice.text}</span>
-          </span>
-          {notice.detail ? <span className={styles.noticeDetail}>{notice.detail}</span> : null}
-        </div>
+        <NoticeBody key={notice.id} notice={notice} durationMs={durationMs} />
       ) : null}
     </>
+  );
+}
+
+function NoticeBody({
+  notice,
+  durationMs,
+}: {
+  notice: Notice;
+  durationMs: number;
+}): ReactElement {
+  // Touched once, the pill stops fading: FeedApp keeps it while the link has
+  // focus or a selection, then removes it (R3A-04).
+  const [held, setHeld] = useState(false);
+  const hold = () => setHeld(true);
+  return (
+    <div
+      className={`${styles.notice}${notice.detail ? ` ${styles.noticeWithDetail}` : ""}`}
+      data-notice={notice.kind}
+      data-held={held ? "true" : undefined}
+      style={{ "--notice-ms": `${durationMs}ms` } as CSSProperties}
+      onPointerDown={notice.detail ? hold : undefined}
+      onFocus={notice.detail ? hold : undefined}
+    >
+      {/* The text is already announced by the status region above. */}
+      <span className={styles.noticeRow} aria-hidden="true">
+        {notice.kind === "sound" ? <SpeakerGlyph /> : null}
+        {notice.kind === "share_copied" ? <CheckGlyph /> : null}
+        <span>{notice.text}</span>
+      </span>
+      {notice.detail ? (
+        // A read-only field: reachable with Tab and by screen readers, and
+        // selected whole on focus, so the link can be copied by hand.
+        <input
+          className={styles.noticeDetail}
+          type="text"
+          readOnly
+          value={notice.detail}
+          aria-label="Link to copy"
+          data-notice-detail="true"
+          onFocus={(event) => event.currentTarget.select()}
+        />
+      ) : null}
+    </div>
   );
 }

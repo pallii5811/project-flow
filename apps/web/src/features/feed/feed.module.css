@@ -25,14 +25,18 @@
   max-height: 100dvh;
   background: var(--flow-media, #050505);
   overflow: hidden;
+  /*
+   * Overlays size themselves to the stage, not the window: a landscape phone
+   * or a 200% zoom gives a narrow or short stage (R3A-01).
+   */
+  container: stage / size;
 }
 
 @media (min-width: 768px) {
   .stageShell {
     align-items: center;
     padding: 24px;
-    background:
-      radial-gradient(ellipse 55% 50% at 50% 42%, #121214 0%, #070708 72%);
+    background: radial-gradient(ellipse 55% 50% at 50% 42%, #121214 0%, #070708 72%);
   }
 
   .stage {
@@ -44,6 +48,19 @@
       0 24px 64px rgba(0, 0, 0, 0.55);
     /* Contain paint for smoother scroll inside frame */
     contain: layout paint;
+  }
+}
+
+/* A landscape phone: the frame takes the whole height instead of losing 48 px to padding. */
+@media (min-width: 768px) and (max-height: 480px) {
+  .stageShell {
+    padding: 0;
+  }
+
+  .stage {
+    width: calc(100dvh * 9 / 16);
+    height: 100dvh;
+    border-radius: 0;
   }
 }
 
@@ -160,6 +177,8 @@
 
 .overlay {
   position: absolute;
+  /* Never higher than the notice slot: captions stay below "Tap for sound". */
+  top: calc(64px + env(safe-area-inset-top));
   left: 0;
   right: 68px;
   bottom: 0;
@@ -168,6 +187,7 @@
   color: #f7f5f2;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 8px;
   max-width: 100%;
   pointer-events: none;
@@ -190,6 +210,16 @@
 .overlayInactive {
   opacity: 0.55;
   animation: none;
+}
+
+/* When space runs out, the hook gives way first: never the dialogue or the title. */
+.overlay > * {
+  flex-shrink: 0;
+}
+
+.overlay > .hook {
+  flex-shrink: 1;
+  min-height: 0;
 }
 
 @keyframes overlayEnter {
@@ -341,11 +371,7 @@
 .progressFill {
   height: 100%;
   width: 100%;
-  background: linear-gradient(
-    90deg,
-    rgba(232, 220, 200, 0.55),
-    rgba(247, 245, 242, 0.9)
-  );
+  background: linear-gradient(90deg, rgba(232, 220, 200, 0.55), rgba(247, 245, 242, 0.9));
   transform-origin: left center;
   transition: transform 60ms linear;
 }
@@ -736,23 +762,37 @@
   color: var(--flow-accent, #e8dcc8);
 }
 
-/* One line, selected whole by a long press: the full link is copied even where it is cut. */
+/* Touched, the pill stays put: it leaves when the viewer is done with the link. */
+.notice[data-held="true"] {
+  animation: noticeIn 240ms var(--flow-ease-out, ease-out) both;
+}
+
+/*
+ * A read-only field on one line: focus selects the whole link, so it is
+ * copied in full even where the end is cut.
+ */
 .noticeDetail {
   display: block;
   box-sizing: border-box;
-  width: min(280px, calc(100vw - 80px));
+  width: min(280px, calc(100cqw - 80px));
+  margin: 0;
   padding: 6px 10px;
+  border: 1px solid transparent;
   border-radius: 8px;
   background: rgba(247, 245, 242, 0.08);
+  font-family: var(--font-body), sans-serif;
   font-size: 13px;
   line-height: 18px;
-  color: rgba(247, 245, 242, 0.8);
-  white-space: nowrap;
-  overflow: hidden;
+  color: rgba(247, 245, 242, 0.84);
   text-overflow: ellipsis;
   text-align: left;
-  user-select: all;
-  -webkit-user-select: all;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.noticeDetail:focus-visible {
+  border-color: var(--flow-accent, #e8dcc8);
 }
 
 .upNext {
@@ -800,11 +840,6 @@
   position: absolute;
   inset: 0;
   z-index: 15;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: 22px;
-  padding: 24px 20px calc(28px + env(safe-area-inset-bottom));
   color: #f4f3f1;
   /* Opaque where the title, hook and rail sit, so nothing ghosts through. */
   background: linear-gradient(
@@ -817,8 +852,36 @@
   animation: gateFade 320ms var(--flow-ease-out, ease-out) both;
 }
 
+/*
+ * The column scrolls when the stage is too short for it (R3A-01). The auto
+ * margin of the first child sits the content at the bottom when it fits and
+ * lets it start at the top when it does not: nothing lands above the frame.
+ */
+.seriesEndScroll {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: calc(64px + env(safe-area-inset-top)) 20px
+    calc(28px + env(safe-area-inset-bottom));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.seriesEndScroll::-webkit-scrollbar {
+  display: none;
+}
+
+.seriesEndScroll > :first-child {
+  margin-top: auto;
+}
+
 .seriesEndClose {
   position: absolute;
+  z-index: 1;
   top: calc(10px + env(safe-area-inset-top));
   right: 8px;
   width: 44px;
@@ -865,6 +928,7 @@
   font-weight: 700;
   letter-spacing: -0.035em;
   color: #faf8f4;
+  text-wrap: balance;
 }
 
 .seriesEndMeta {
@@ -963,6 +1027,7 @@
   font-weight: 600;
   letter-spacing: -0.02em;
   color: #faf8f4;
+  text-wrap: balance;
 }
 
 .nextStoryHook {
@@ -1003,6 +1068,194 @@
   color: rgba(247, 245, 242, 0.6);
 }
 
+/* ---------- Short and narrow stages (R3A-01) ---------- */
+
+/* A landscape phone: the rail fits the height instead of running off the top. */
+@container stage (max-height: 480px) {
+  .rail {
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    gap: 2px;
+  }
+
+  .railButton {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* The strip reaches as low as the rail, so no rail icon peeks out under it. */
+  .strip {
+    bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .overlayCovered {
+    padding-bottom: calc(190px + env(safe-area-inset-bottom));
+  }
+
+  /* Here the strip covers most of the rail: the rail steps aside instead of being cut in half. */
+  .slide:has(.overlayCovered) .rail {
+    visibility: hidden;
+  }
+
+  .seriesEnd {
+    /* The content reaches the top here: no rail ghosting behind the close button. */
+    background: linear-gradient(
+      to top,
+      #060607 0%,
+      #060607 70%,
+      rgba(6, 6, 7, 0.94) 100%
+    );
+  }
+
+  .seriesEndScroll {
+    gap: 14px;
+    padding-top: calc(52px + env(safe-area-inset-top));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .seriesEndBody {
+    gap: 6px;
+  }
+
+  .seriesEndTitle {
+    font-size: 24px;
+  }
+
+  .seriesEndMeta {
+    max-width: none;
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .seriesEndActions {
+    margin-top: 6px;
+    gap: 8px;
+  }
+
+  .seriesEndAction {
+    padding: 0 16px 0 12px;
+    font-size: 14px;
+  }
+
+  .nextStory {
+    grid-template-columns: 48px 1fr 40px;
+    gap: 12px;
+    padding: 8px 12px 8px 8px;
+    border-radius: 16px;
+  }
+
+  .nextStoryPoster {
+    width: 48px;
+    height: 72px;
+    border-radius: 8px;
+  }
+
+  .nextStoryTitle {
+    font-size: 16px;
+    line-height: 21px;
+  }
+
+  .nextStoryHook {
+    -webkit-line-clamp: 1;
+  }
+
+  .nextStoryPlay {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/*
+ * A narrow stage (a landscape phone's 9:16 frame, a 200% zoom): the text
+ * column gets the room the rail leaves, captions and title step down a size.
+ */
+@container stage (max-width: 300px) {
+  .overlay {
+    right: 56px;
+    padding-left: 12px;
+    padding-right: 0;
+    gap: 6px;
+  }
+
+  .caption {
+    margin-bottom: 8px;
+    max-width: none;
+    font-size: 16px;
+    line-height: 1.45;
+  }
+
+  .captionLine {
+    padding: 2px 7px 3px;
+    border-radius: 6px;
+  }
+
+  .episodeKicker {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+
+  .seriesTitle {
+    font-size: 22px;
+    max-width: none;
+  }
+
+  .hook {
+    font-size: 14px;
+    line-height: 20px;
+    max-width: none;
+    overflow: hidden;
+  }
+
+  .seriesEndScroll {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .seriesEndTitle {
+    font-size: 24px;
+  }
+
+  .seriesEndActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .seriesEndAction {
+    justify-content: center;
+    padding: 0 12px;
+  }
+
+  .nextStory {
+    grid-template-columns: 1fr 40px;
+    gap: 10px;
+    padding: 12px 10px 12px 14px;
+  }
+
+  /* No room for the poster or a hook cut after two words: title and position say enough. */
+  .nextStoryPoster,
+  .nextStoryHook {
+    display: none;
+  }
+
+  .nextStoryTitle {
+    font-size: 16px;
+    line-height: 21px;
+  }
+
+  /* One line each, icon beside its words: a label broken in two looks cut. */
+  .seriesEndAction {
+    gap: 6px;
+    padding: 0 8px;
+    font-size: 14px;
+    line-height: 19px;
+    white-space: nowrap;
+  }
+
+  .nextStoryPlay {
+    width: 40px;
+    height: 40px;
+  }
+}
+
 .empty {
   position: absolute;
   inset: 0;
@@ -1034,6 +1287,10 @@
   .upNext {
     animation: noticeOut 1ms linear forwards !important;
     animation-delay: calc(var(--notice-ms, 1800ms) - 1ms) !important;
+  }
+
+  .notice[data-held="true"] {
+    animation: none !important;
   }
 
   .poster {

@@ -27,6 +27,20 @@ export function effectiveCaptions(
   return choice ?? muted;
 }
 
+/**
+ * The choice a caption toggle records, or null when there is nothing to toggle:
+ * on an episode without captions the key does nothing, so no invisible "off"
+ * is saved for every series (R3A-03).
+ */
+export function nextCaptionChoice(
+  choice: CaptionChoice,
+  muted: boolean,
+  available: boolean,
+): boolean | null {
+  if (!available) return null;
+  return !effectiveCaptions(choice, muted, true);
+}
+
 /** Reads a stored choice. Anything unexpected is no choice, never "off". */
 export function parseCaptionChoice(raw: string | null): CaptionChoice {
   if (raw === "on") return true;
@@ -130,6 +144,12 @@ export const SOUND_CUE_VISIBLE_MS = 4_000;
 /** Shown once per browser session, never again after a reload. */
 export const SOUND_CUE_SESSION_KEY = "project-flow.sound-cue.v1";
 
+/**
+ * Past this long after the episode's first frame the cue is no longer an
+ * invitation but an interruption: it waits for the next episode (R3A-02).
+ */
+export const SOUND_CUE_LATEST_MS = 2_000;
+
 export function shouldShowSoundCue(input: {
   muted: boolean;
   /** A frame of the active episode is on screen. */
@@ -137,8 +157,30 @@ export function shouldShowSoundCue(input: {
   alreadyShown: boolean;
   /** The tap-to-play gate, an error, a sheet or a card owns the screen. */
   blocked: boolean;
+  /** Time since the active episode's first frame; null before it. */
+  sinceFirstFrameMs: number | null;
 }): boolean {
-  return input.muted && input.playing && !input.alreadyShown && !input.blocked;
+  return (
+    input.muted &&
+    input.playing &&
+    !input.alreadyShown &&
+    !input.blocked &&
+    input.sinceFirstFrameMs !== null &&
+    input.sinceFirstFrameMs <= SOUND_CUE_LATEST_MS
+  );
+}
+
+/**
+ * A notice the viewer is using does not leave under their finger: the link
+ * shown when the clipboard refused stays while it has focus or a selection
+ * (R3A-04). Other notices keep their fixed time.
+ */
+export function shouldHoldNotice(input: {
+  kind: "sound" | "share_copied" | "share_failed";
+  focusInside: boolean;
+  selectionInside: boolean;
+}): boolean {
+  return input.kind === "share_failed" && (input.focusInside || input.selectionInside);
 }
 
 /* ---------- Timestamped share (OPP-02) ---------- */

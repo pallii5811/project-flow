@@ -47,6 +47,14 @@
  *  23. a pause shows a play glyph, playing again removes it;
  *  24. the end of a series offers share and follow and starts nothing by itself;
  *      with --scale, tapping the next story plays another series from episode 1.
+ *
+ * Batch 3a review (R3A):
+ *  25. on a landscape phone (812x375) the series end is inside the screen and
+ *      its next story is reachable (both modes);
+ *  26. there, at the cold open, the caption sits below the notice and left of the rail;
+ *  27. a notice replaces the "Next episode" label; a label fading a few seconds in
+ *      does not bring "Tap for sound";
+ *  28. the link shown when copying fails is a reachable field that stays while focused.
  * Checks 11 and 15 expect a "Next episode" label without a button (B2-UPNEXT).
  */
 import { spawn } from "node:child_process";
@@ -1523,6 +1531,281 @@ try {
       );
     }
     await endContext.close();
+  }
+
+  // 25: a landscape phone (812x375: the 9:16 frame is 211 px wide). The end of
+  // the series stays inside the screen, its actions are the topmost element
+  // where they are drawn, and the next story is reachable by scrolling (R3A-01).
+  {
+    const endPath = SCALE
+      ? "/watch/stress-2/episode-60"
+      : "/watch/signal-night/episode-5";
+    const landscape = await browser.newContext({
+      viewport: { width: 812, height: 375 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    await landscape.addInitScript(installPlayingProbe);
+    const page = await landscape.newPage();
+    trackPage(page, "series end landscape", consoleErrors, []);
+    await page.goto(`${BASE}${endPath}`, { waitUntil: "domcontentloaded" });
+    const ended = await page
+      .waitForSelector("[data-series-end]", { timeout: 30_000 })
+      .then(() => true)
+      .catch(() => false);
+    await sleep(900);
+    const reach = await page.evaluate(() => {
+      const end = document.querySelector("[data-series-end]");
+      const onTop = (element) => {
+        if (!element) return null;
+        const box = element.getBoundingClientRect();
+        const x = box.left + box.width / 2;
+        const y = box.top + box.height / 2;
+        return {
+          top: Math.round(box.top),
+          bottom: Math.round(box.bottom),
+          inside: box.top >= 0 && box.bottom <= window.innerHeight,
+          hit: element.contains(document.elementFromPoint(x, y)),
+        };
+      };
+      const buttons = [...(end?.querySelectorAll("button") ?? [])];
+      const label = end?.querySelector("p") ?? null;
+      const share = buttons.find((b) => b.textContent === "Share this story") ?? null;
+      const close = end?.querySelector('[aria-label="Close"]') ?? null;
+      const last =
+        end?.querySelector("[data-next-story]") ??
+        end?.lastElementChild?.lastElementChild ??
+        null;
+      const before = { label: onTop(label), share: onTop(share), close: onTop(close) };
+      last?.scrollIntoView({ block: "end" });
+      // A label that runs past its button is cut: every action fits on its line.
+      const overflowing = buttons
+        .filter((button) => button.scrollWidth > button.clientWidth + 1)
+        .map((button) => button.textContent);
+      return { ...before, last: onTop(last), overflowing };
+    });
+    measured.seriesEndLandscape = { ended, ...reach };
+    check(ended, `the end of the series never showed at 812x375 on ${endPath}`);
+    for (const part of ["label", "share", "close", "last"]) {
+      check(
+        reach[part]?.inside === true && reach[part]?.hit === true,
+        `at 812x375 the series end ${part} is clipped or covered: ${JSON.stringify(reach[part] ?? null)}`,
+      );
+    }
+    check(
+      reach.overflowing.length === 0,
+      `at 812x375 a series end action runs past its button: ${JSON.stringify(reach.overflowing)}`,
+    );
+    await landscape.close();
+  }
+
+  if (!SCALE) {
+    // 26: the same landscape phone at the cold open: the caption stays inside
+    // the frame, below the "Tap for sound" slot and left of the rail (R3A-01).
+    {
+      const landscape = await browser.newContext({
+        viewport: { width: 812, height: 375 },
+        isMobile: true,
+        hasTouch: true,
+      });
+      await landscape.addInitScript(installPlayingProbe);
+      const page = await landscape.newPage();
+      trackPage(page, "cold open landscape", consoleErrors, []);
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      const shown = await page
+        .waitForFunction(
+          () =>
+            document.querySelector('[data-active="true"] [data-caption]') !== null &&
+            document.querySelector('[data-notice="sound"]') !== null,
+          null,
+          { timeout: 10_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      const boxes = await page.evaluate(() => {
+        const rect = (selector) => {
+          const box = document.querySelector(selector)?.getBoundingClientRect();
+          return box
+            ? {
+                left: Math.round(box.left),
+                top: Math.round(box.top),
+                right: Math.round(box.right),
+                bottom: Math.round(box.bottom),
+              }
+            : null;
+        };
+        return {
+          caption: rect('[data-active="true"] [data-caption]'),
+          notice: rect('[data-notice="sound"]'),
+          rail: rect('[data-active="true"] [role="toolbar"]'),
+          viewportHeight: window.innerHeight,
+        };
+      });
+      measured.coldOpenLandscape = { shown, ...boxes };
+      const { caption, notice, rail } = boxes;
+      check(
+        shown &&
+          caption !== null &&
+          notice !== null &&
+          rail !== null &&
+          caption.top >= notice.bottom &&
+          caption.bottom <= boxes.viewportHeight &&
+          caption.right <= rail.left &&
+          rail.top >= 0,
+        `at 812x375 the caption is clipped, under the notice or under the rail: ${JSON.stringify(measured.coldOpenLandscape)}`,
+      );
+      await landscape.close();
+    }
+
+    // 27: one slot at the top. A notice replaces the "Next episode" label
+    // instead of drawing over it, and when the label fades by itself a few
+    // seconds in, "Tap for sound" does not interrupt the episode (R3A-02).
+    {
+      const finished = {
+        contentId: "item_signal_1",
+        seriesId: "series_signal",
+        episodeId: "ep_signal_1",
+        positionMs: 10_000,
+        durationMs: 10_000,
+        muted: true,
+        captionsOn: false,
+        completed: true,
+        updatedAt: Date.now(),
+      };
+      const slotContext = await phoneContext(browser, finished);
+      await slotContext.addInitScript(() => {
+        Object.defineProperty(Navigator.prototype, "share", {
+          value: undefined,
+          configurable: true,
+        });
+        Object.defineProperty(Navigator.prototype, "clipboard", {
+          configurable: true,
+          get: () => ({ writeText: () => Promise.resolve() }),
+        });
+      });
+      const page = await slotContext.newPage();
+      trackPage(page, "notice slot", consoleErrors, []);
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      const labelled = await page
+        .waitForSelector('[data-resume-offer="next_episode"]', { timeout: 10_000 })
+        .then(() => true)
+        .catch(() => false);
+      await sleep(700);
+      await page.click('[data-active="true"] [aria-label="Share"]');
+      await page
+        .waitForSelector('[data-notice="share_copied"]', { timeout: 2_000 })
+        .catch(() => null);
+      const together = await page.evaluate(() => ({
+        notice:
+          document.querySelector("[data-notice]")?.getAttribute("data-notice") ?? null,
+        label: document.querySelector('[data-resume-offer="next_episode"]') !== null,
+      }));
+      measured.noticeSlot = { labelled, together };
+      check(
+        labelled && together.notice === "share_copied" && !together.label,
+        `the "Next episode" label and a notice share the top slot: ${JSON.stringify(measured.noticeSlot)}`,
+      );
+      await slotContext.close();
+
+      const lateContext = await phoneContext(browser, {
+        ...finished,
+        updatedAt: Date.now(),
+      });
+      const late = await lateContext.newPage();
+      trackPage(late, "late sound cue", consoleErrors, []);
+      const events = collectAnalytics(late);
+      await late.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await late
+        .waitForSelector('[data-resume-offer="next_episode"]', { timeout: 10_000 })
+        .catch(() => null);
+      await sleep(6_500);
+      const lateCue = {
+        label: await late.evaluate(
+          () => document.querySelector('[data-resume-offer="next_episode"]') !== null,
+        ),
+        cues: events.filter((event) => event.name === "sound_cue_shown").length,
+      };
+      measured.lateSoundCue = lateCue;
+      check(
+        !lateCue.label && lateCue.cues === 0,
+        `"Tap for sound" interrupted an episode already under way: ${JSON.stringify(lateCue)}`,
+      );
+      await lateContext.close();
+    }
+
+    // 28: when the clipboard refuses, the link is a real, reachable field (not
+    // hidden from assistive tech) and it stays while it has focus (R3A-04).
+    {
+      const failContext = await phoneContext(browser, null);
+      await failContext.addInitScript(() => {
+        Object.defineProperty(Navigator.prototype, "share", {
+          value: undefined,
+          configurable: true,
+        });
+        Object.defineProperty(Navigator.prototype, "clipboard", {
+          configurable: true,
+          get: () => ({ writeText: () => Promise.reject(new Error("refused")) }),
+        });
+      });
+      const page = await failContext.newPage();
+      trackPage(page, "share failed", consoleErrors, []);
+      await page.goto(`${BASE}/watch/signal-night/episode-2`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      await page.click('[data-active="true"] [aria-label="Share"]');
+      const field = await page
+        .waitForSelector("[data-notice-detail]", { timeout: 2_000 })
+        .then(() =>
+          page.evaluate(() => {
+            const input = document.querySelector("[data-notice-detail]");
+            return {
+              value: input?.value ?? null,
+              label: input?.getAttribute("aria-label") ?? null,
+              hidden: input?.closest('[aria-hidden="true"]') !== null,
+            };
+          }),
+        )
+        .catch(() => null);
+      await page.focus("[data-notice-detail]").catch(() => null);
+      const selected = await page.evaluate(() => {
+        const input = document.querySelector("[data-notice-detail]");
+        return input
+          ? input.selectionEnd - input.selectionStart === input.value.length
+          : false;
+      });
+      await sleep(7_000);
+      const heldAfter7s = await page.evaluate(
+        () => document.querySelector('[data-notice="share_failed"]') !== null,
+      );
+      await page.evaluate(() => {
+        document.activeElement?.blur();
+        window.getSelection()?.removeAllRanges();
+      });
+      const released = await page
+        .waitForFunction(() => document.querySelector("[data-notice]") === null, null, {
+          timeout: 2_500,
+        })
+        .then(() => true)
+        .catch(() => false);
+      measured.shareFailed = { field, selected, heldAfter7s, released };
+      check(
+        field !== null &&
+          // The 10 s episode may have continued to the next one before the tap.
+          /\/watch\/signal-night\/episode-\d+\?/.test(field.value ?? "") &&
+          field.label === "Link to copy" &&
+          !field.hidden &&
+          selected,
+        `the link shown when copying fails is not a reachable, selected field: ${JSON.stringify(measured.shareFailed)}`,
+      );
+      check(
+        heldAfter7s && released,
+        `the failed-copy link left while focused, or stayed after: ${JSON.stringify(measured.shareFailed)}`,
+      );
+      await failContext.close();
+    }
   }
 
   // 6: unknown episode.

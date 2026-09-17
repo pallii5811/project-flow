@@ -11,18 +11,21 @@ import { describe, expect, it } from "vitest";
 import { buildShareUrl } from "./feedLogic";
 import {
   SHARE_PREROLL_MS,
+  SOUND_CUE_LATEST_MS,
   activeCueText,
   contrastRatio,
   cuePlainText,
   effectiveCaptions,
   episodePosition,
   migratedCaptionChoice,
+  nextCaptionChoice,
   parseCaptionChoice,
   parseShareStartMs,
   pickNextStory,
   placeStory,
   serializeCaptionChoice,
   shareStartSeconds,
+  shouldHoldNotice,
   shouldShowSoundCue,
   storyShareTarget,
   worstCaseCaptionContrast,
@@ -115,7 +118,13 @@ describe("captions (decision 3)", () => {
 });
 
 describe("the sound cue", () => {
-  const base = { muted: true, playing: true, alreadyShown: false, blocked: false };
+  const base = {
+    muted: true,
+    playing: true,
+    alreadyShown: false,
+    blocked: false,
+    sinceFirstFrameMs: 200,
+  };
 
   it("shows for a muted episode on screen, once", () => {
     expect(shouldShowSoundCue(base)).toBe(true);
@@ -126,6 +135,53 @@ describe("the sound cue", () => {
     expect(shouldShowSoundCue({ ...base, muted: false })).toBe(false);
     expect(shouldShowSoundCue({ ...base, playing: false })).toBe(false);
     expect(shouldShowSoundCue({ ...base, blocked: true })).toBe(false);
+    expect(shouldShowSoundCue({ ...base, sinceFirstFrameMs: null })).toBe(false);
+  });
+
+  it("does not interrupt an episode already under way when a label fades (R3A-02)", () => {
+    expect(shouldShowSoundCue({ ...base, sinceFirstFrameMs: SOUND_CUE_LATEST_MS })).toBe(
+      true,
+    );
+    expect(shouldShowSoundCue({ ...base, sinceFirstFrameMs: 3_600 })).toBe(false);
+  });
+});
+
+describe("a notice the viewer is using (R3A-04)", () => {
+  it("stays while the link has focus or a selection", () => {
+    const failed = {
+      kind: "share_failed" as const,
+      focusInside: false,
+      selectionInside: false,
+    };
+    expect(shouldHoldNotice(failed)).toBe(false);
+    expect(shouldHoldNotice({ ...failed, focusInside: true })).toBe(true);
+    expect(shouldHoldNotice({ ...failed, selectionInside: true })).toBe(true);
+  });
+
+  it("never holds a notice with nothing to copy", () => {
+    expect(
+      shouldHoldNotice({ kind: "sound", focusInside: true, selectionInside: true }),
+    ).toBe(false);
+    expect(
+      shouldHoldNotice({
+        kind: "share_copied",
+        focusInside: true,
+        selectionInside: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("the caption toggle (R3A-03)", () => {
+  it("records nothing on an episode without captions", () => {
+    expect(nextCaptionChoice(null, true, false)).toBeNull();
+    expect(nextCaptionChoice(true, false, false)).toBeNull();
+  });
+
+  it("flips what is on screen when captions exist", () => {
+    expect(nextCaptionChoice(null, true, true)).toBe(false);
+    expect(nextCaptionChoice(null, false, true)).toBe(true);
+    expect(nextCaptionChoice(false, true, true)).toBe(true);
   });
 });
 

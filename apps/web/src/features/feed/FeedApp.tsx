@@ -75,12 +75,14 @@ import {
   effectiveCaptions,
   episodePosition,
   migratedCaptionChoice,
+  nextCaptionChoice,
   parseCaptionChoice,
   parseShareStartMs,
   pickNextStory,
   placeStory,
   serializeCaptionChoice,
   shareStartSeconds,
+  shouldHoldNotice,
   shouldShowSoundCue,
   storyShareTarget,
   type CaptionChoice,
@@ -151,6 +153,8 @@ const NOTICE_MS: Record<Notice["kind"], number> = {
   // Long enough to select the link by hand.
   share_failed: 6_000,
 };
+/** A held notice checks again this often whether the viewer is done with it. */
+const NOTICE_HOLD_RECHECK_MS = 1_000;
 /** The "Next episode" label of a returning viewer fades after this. */
 const UP_NEXT_LABEL_MS = 4_000;
 
@@ -250,6 +254,8 @@ export function FeedApp({
   const noticeSeq = useRef(0);
   /** The active episode whose first frame is on screen (for the sound cue). */
   const [framedContentId, setFramedContentId] = useState<string | null>(null);
+  /** When that first frame came, so a late cue never interrupts (R3A-02). */
+  const framedAtRef = useRef<{ contentId: string; at: number } | null>(null);
   const soundCueShown = useRef(false);
   /** `?t=` of a shared link, applied to the landing episode only (OPP-02). */
   const shareStartMs = useRef<number | null>(null);
@@ -1034,6 +1040,9 @@ export function FeedApp({
   const showNotice = useCallback((next: Omit<Notice, "id">) => {
     noticeSeq.current += 1;
     setNotice({ ...next, id: noticeSeq.current });
+    // One slot at the top: a notice replaces the "Next episode" label instead
+    // of being drawn over it (R3A-02). The Continue strip is not in that slot.
+    setResumeOffer((offer) => (offer?.reason === "next_episode" ? null : offer));
   }, []);
 
   /**
@@ -1179,6 +1188,10 @@ export function FeedApp({
         playing: current !== null && framedContentId === current.id,
         alreadyShown: soundCueShown.current,
         blocked: cueBlocked,
+        sinceFirstFrameMs:
+          current !== null && framedAtRef.current?.contentId === current.id
+            ? performance.now() - framedAtRef.current.at
+            : null,
       })
     ) {
       return;
@@ -1193,9 +1206,30 @@ export function FeedApp({
   useEffect(() => {
     if (!notice) return;
     const shown = notice.id;
+    const kind = notice.kind;
     const hide = () => setNotice((value) => (value?.id === shown ? null : value));
-    const timer = window.setTimeout(hide, NOTICE_MS[notice.kind]);
-    if (notice.kind !== "sound") return () => window.clearTimeout(timer);
+    let timer = 0;
+    // The link shown when copying failed stays while it is being copied (R3A-04).
+    const expire = () => {
+      const pill = document.querySelector("[data-notice]");
+      const selection = window.getSelection();
+      const held = shouldHoldNotice({
+        kind,
+        focusInside: pill !== null && pill.contains(document.activeElement),
+        selectionInside:
+          pill !== null &&
+          selection !== null &&
+          !selection.isCollapsed &&
+          pill.contains(selection.anchorNode),
+      });
+      if (held) {
+        timer = window.setTimeout(expire, NOTICE_HOLD_RECHECK_MS);
+        return;
+      }
+      hide();
+    };
+    timer = window.setTimeout(expire, NOTICE_MS[kind]);
+    if (kind !== "sound") return () => window.clearTimeout(timer);
     window.addEventListener("pointerdown", hide, true);
     window.addEventListener("keydown", hide, true);
     return () => {
@@ -1285,7 +1319,14 @@ export function FeedApp({
     onToggleCaptions: () => {
       // The explicit choice wins from now on, whatever the sound does, and is
       // remembered on this device (decision 3).
-      const next = !effectiveCaptions(captionChoiceRef.current, mutedRef.current, true);
+      // Nothing to toggle on an episode without captions: no invisible "off"
+      // is saved for every series (R3A-03).
+      const next = nextCaptionChoice(
+        captionChoiceRef.current,
+        mutedRef.current,
+        current?.captionsAvailable ?? false,
+      );
+      if (next === null) return;
       captionChoiceRef.current = next;
       setCaptionChoice(next);
       writeStored("local", CAPTIONS_PREFERENCE_KEY, serializeCaptionChoice(next));
@@ -1437,6 +1478,9 @@ export function FeedApp({
     },
     onPlaying: (item, info) => {
       if (item.id !== current?.id) return;
+      if (framedAtRef.current?.contentId !== item.id) {
+        framedAtRef.current = { contentId: item.id, at: performance.now() };
+      }
       setFramedContentId(item.id);
       setAutoplayBlocked(false);
       setUserStartedPlayback(true);
