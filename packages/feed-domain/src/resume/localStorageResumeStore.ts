@@ -1,20 +1,29 @@
 import {
+  RESUME_SERIES_CAP,
   createMemoryResumeStore,
+  sortResumeEntries,
+  upsertResumeEntry,
   type ResumeSnapshot,
   type ResumeStore,
 } from "./resumeStore";
 
-const STORAGE_KEY = "project-flow.resume.v1";
+/** One entry per series (VIR-2). */
+export const RESUME_STORAGE_KEY = "project-flow.resume.v2";
+/** The single snapshot written before resume points were kept per series. */
+export const LEGACY_RESUME_STORAGE_KEY = "project-flow.resume.v1";
 
-function hasLocalStorage(): boolean {
+type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+function localStorageOrNull(): StorageLike | null {
   try {
-    return typeof globalThis.localStorage?.getItem === "function";
+    const storage = globalThis.localStorage;
+    return typeof storage?.getItem === "function" ? storage : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-function isResumeSnapshot(value: unknown): value is ResumeSnapshot {
+export function isResumeSnapshot(value: unknown): value is ResumeSnapshot {
   if (typeof value !== "object" || value === null) return false;
   const row = value as Record<string, unknown>;
   return (
@@ -30,28 +39,82 @@ function isResumeSnapshot(value: unknown): value is ResumeSnapshot {
   );
 }
 
+function parseJson(raw: string | null): unknown {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads both formats: the per-series list and, until it is rewritten, the old
+ * single snapshot. Invalid rows are dropped, never the whole list.
+ */
+export function readResumeEntries(v2Raw: string | null, v1Raw: string | null): ResumeSnapshot[] {
+  const parsed = parseJson(v2Raw);
+  const rows =
+    typeof parsed === "object" && parsed !== null && Array.isArray((parsed as { entries?: unknown }).entries)
+      ? ((parsed as { entries: unknown[] }).entries)
+      : [];
+  let entries = sortResumeEntries(rows.filter(isResumeSnapshot));
+  const legacy = parseJson(v1Raw);
+  if (isResumeSnapshot(legacy)) {
+    const known = entries.find((entry) => entry.seriesId === legacy.seriesId);
+    if (!known || known.updatedAt < legacy.updatedAt) {
+      entries = upsertResumeEntry(entries, legacy);
+    }
+  }
+  return entries.slice(0, RESUME_SERIES_CAP);
+}
+
 /** Web resume store backed by `localStorage` (falls back to memory when unavailable). */
-export function createLocalStorageResumeStore(): ResumeStore {
-  if (!hasLocalStorage()) {
+export function createLocalStorageResumeStore(
+  storage: StorageLike | null = localStorageOrNull(),
+): ResumeStore {
+  if (!storage) {
     return createMemoryResumeStore();
   }
 
+  const readAll = (): ResumeSnapshot[] => {
+    try {
+      return readResumeEntries(
+        storage.getItem(RESUME_STORAGE_KEY),
+        storage.getItem(LEGACY_RESUME_STORAGE_KEY),
+      );
+    } catch {
+      return [];
+    }
+  };
+
   return {
     async load() {
-      const raw = globalThis.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      try {
-        const parsed: unknown = JSON.parse(raw);
-        return isResumeSnapshot(parsed) ? parsed : null;
-      } catch {
-        return null;
-      }
+      return readAll()[0] ?? null;
+    },
+    async loadForSeries(seriesId) {
+      return readAll().find((entry) => entry.seriesId === seriesId) ?? null;
+    },
+    async loadAll() {
+      return readAll();
     },
     async save(snapshot) {
-      globalThis.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      const entries = upsertResumeEntry(readAll(), snapshot);
+      try {
+        storage.setItem(RESUME_STORAGE_KEY, JSON.stringify({ version: 2, entries }));
+        // Migrated into the list: the old key would otherwise shadow newer points.
+        storage.removeItem(LEGACY_RESUME_STORAGE_KEY);
+      } catch {
+        // Full or blocked storage: resume is a convenience, never an error.
+      }
     },
     async clear() {
-      globalThis.localStorage.removeItem(STORAGE_KEY);
+      try {
+        storage.removeItem(RESUME_STORAGE_KEY);
+        storage.removeItem(LEGACY_RESUME_STORAGE_KEY);
+      } catch {
+        // nothing to clear
+      }
     },
   };
 }

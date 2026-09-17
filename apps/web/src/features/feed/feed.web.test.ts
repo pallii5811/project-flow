@@ -9,7 +9,14 @@ import {
   watchPathForItem,
 } from "@project-flow/feed-domain";
 
-import { buildShareUrl, shouldShowPlayGate } from "./feedLogic";
+import {
+  ERROR_SKIP_DELAY_MS,
+  buildShareUrl,
+  firstPlayStartMode,
+  isAtSlide,
+  settledIndex,
+  shouldShowPlayGate,
+} from "./feedLogic";
 import {
   loadAcquisitionContext,
   parseAcquisitionSearch,
@@ -80,5 +87,41 @@ describe("acquisition attribution", () => {
     });
     expect(merged.shareId).toBe("share_abc");
     expect(loadAcquisitionContext()?.utmSource).toBe("share");
+  });
+});
+
+describe("scroll settles before the index moves (PB-6)", () => {
+  it("rounds to the nearest slide and stays inside the list", () => {
+    expect(settledIndex(0, 800, 5)).toBe(0);
+    expect(settledIndex(1_250, 800, 5)).toBe(2);
+    expect(settledIndex(99_999, 800, 5)).toBe(4);
+    expect(settledIndex(-40, 800, 5)).toBe(0);
+    expect(settledIndex(10, 800, 0)).toBeNull();
+  });
+
+  it("does not scroll to a slide the scroller already rests on", () => {
+    expect(isAtSlide(1_600.5, 1_600)).toBe(true);
+    expect(isAtSlide(1_200, 1_600)).toBe(false);
+  });
+});
+
+describe("first play start mode (MP-2)", () => {
+  it("a gate tap is never counted as autoplay", () => {
+    expect(
+      firstPlayStartMode({ gateTapped: true, resumeLandingId: "a", contentId: "a" }),
+    ).toBe("play_gate");
+  });
+
+  it("the episode a returning viewer landed on is a resume", () => {
+    expect(
+      firstPlayStartMode({ gateTapped: false, resumeLandingId: "a", contentId: "a" }),
+    ).toBe("resume");
+    expect(
+      firstPlayStartMode({ gateTapped: false, resumeLandingId: "a", contentId: "b" }),
+    ).toBe("autoplay");
+  });
+
+  it("the error stays readable before the skip", () => {
+    expect(ERROR_SKIP_DELAY_MS).toBeGreaterThanOrEqual(1_500);
   });
 });

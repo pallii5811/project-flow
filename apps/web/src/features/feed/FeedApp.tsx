@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  applyIntentPage,
   applyRecommendedPage,
+  classifySeriesEnd,
   createCatalogIntentService,
   createDeterministicFeedSource,
   createLocalStorageResumeStore,
@@ -10,13 +12,16 @@ import {
   createWatchProgressThrottle,
   createWebPerfTiming,
   extendFeedPage,
+  finishedLastEpisode,
   fromFeedCatalogPayload,
   getPrefetchIds,
+  isNearEnd,
   isResumable,
   materializeFeedItems,
   needsExtension,
   pageStartingAt,
   placeNextInSeries,
+  resumeLanding,
   shouldPersistResume,
   type CatalogIntentService,
   type ContentItem,
@@ -25,7 +30,9 @@ import {
   type FeedSource,
   type IntentChipId,
   type RecommendationService,
+  type ResumeLanding,
   type ResumeSnapshot,
+  type SeriesEndKind,
 } from "@project-flow/feed-domain";
 import { createLocalFeatureFlags } from "@project-flow/shared";
 import {
@@ -59,7 +66,12 @@ import { FeedScroller } from "./FeedScroller";
 import { FeedStage } from "./FeedStage";
 import { IntentSheet } from "./IntentSheet";
 import { SeriesEnd } from "./SeriesEnd";
-import { buildShareUrl, shouldShowPlayGate } from "./feedLogic";
+import {
+  ERROR_SKIP_DELAY_MS,
+  buildShareUrl,
+  firstPlayStartMode,
+  shouldShowPlayGate,
+} from "./feedLogic";
 import { createProgressStore, createStableHandlers } from "./progressStore";
 import styles from "./feed.module.css";
 
@@ -108,6 +120,18 @@ function whenIdle(callback: () => void): () => void {
   }
   const timer = window.setTimeout(callback, 200);
   return () => window.clearTimeout(timer);
+}
+
+/** A move to another episode whose first frame is still to come (MP-1). */
+type PendingTransition = {
+  toContentId: string;
+  kind: "swipe" | "auto_continue" | "error_skip";
+  /** performance.now() when the move started. */
+  startedAt: number;
+};
+
+function episodeCountOf(catalog: FeedCatalog, item: ContentItem): number | null {
+  return catalog.series.find((series) => series.id === item.seriesId)?.totalEpisodes ?? null;
 }
 
 function hashSeed(input: string): number {
@@ -168,8 +192,10 @@ export function FeedApp({
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [userStartedPlayback, setUserStartedPlayback] = useState(false);
   const [intentOpen, setIntentOpen] = useState(false);
-  const [seriesEnded, setSeriesEnded] = useState(false);
-  const [resumeOffer, setResumeOffer] = useState<ResumeSnapshot | null>(null);
+  const [seriesEnded, setSeriesEnded] = useState<SeriesEndKind | null>(null);
+  const [resumeOffer, setResumeOffer] = useState<ResumeLanding | null>(null);
+  /** The active episode failed; the feed moves on after ERROR_SKIP_DELAY_MS (PB-5). */
+  const [playbackFailure, setPlaybackFailure] = useState<string | null>(null);
 
   const resumeStore = useMemo(() => createLocalStorageResumeStore(), []);
   const progressThrottle = useMemo(() => createWatchProgressThrottle(5_000), []);
@@ -181,6 +207,17 @@ export function FeedApp({
   const contentOpenTracked = useRef<string | null>(null);
   const lastContinueKey = useRef<string | null>(null);
   const sharePlayTracked = useRef(false);
+  const transitionRef = useRef<PendingTransition | null>(null);
+  /** Autoplay was refused at least once before the first play (MP-2). */
+  const autoplayBlockedBeforeFirstPlay = useRef(false);
+  /** performance.now() of the play-gate tap, if the viewer needed one. */
+  const gateTapAt = useRef<number | null>(null);
+  /** The episode a returning viewer landed on. */
+  const resumeLandingId = useRef<string | null>(null);
+  /** Series already reported complete for an episode, once each. */
+  const seriesCompleteSent = useRef<Set<string>>(new Set());
+  /** A chip reordered the feed: a late recommendation must not overwrite it (R1). */
+  const userReorderedRef = useRef(false);
   const indexRef = useRef(index);
   indexRef.current = index;
   const itemsRef = useRef(items);
@@ -296,7 +333,8 @@ export function FeedApp({
           explorationEnabled: true,
         });
         const { items: ranked } = materializeFeedItems(result, data.ordered);
-        if (mountedRef.current && ranked.length > 0) {
+        // A chip chosen meanwhile is what the viewer asked for: keep it (R1).
+        if (mountedRef.current && ranked.length > 0 && !userReorderedRef.current) {
           setItems((prev) => applyRecommendedPage(prev, indexRef.current, ranked));
         }
       } catch {
@@ -320,6 +358,16 @@ export function FeedApp({
   useEffect(() => {
     const timer = window.setTimeout(scheduleFeedPage, CATALOG_FALLBACK_DELAY_MS);
     return () => window.clearTimeout(timer);
+  }, [scheduleFeedPage]);
+
+  // A catalog fetch that failed offline is tried again when the network is
+  // back, so swiping does not stop at the first-frame slides.
+  useEffect(() => {
+    const onOnline = () => {
+      if (firstPlayMarked.current) scheduleFeedPage();
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
   }, [scheduleFeedPage]);
 
   // Grow the page near its end, from catalog order. Before the page exists,
@@ -371,6 +419,8 @@ export function FeedApp({
         content_id: item.id,
         series_id: item.seriesId,
         episode_id: item.episodeId,
+        episode_number: item.episodeNumber,
+        episode_count: episodeCountOf(feedRef.current.catalog, item),
         source: acquisition.shareId || acquisition.utmSource ? "share" : "deep_link",
       });
       contentOpenTracked.current = item.id;
@@ -383,40 +433,70 @@ export function FeedApp({
     }
   }, [analytics, deepLinkRoute, initialContentId]);
 
-  // Resume from localStorage (non-blocking). Deep link preserves resume for same episode.
+  // Resume from localStorage (non-blocking). Sound always starts off: a saved
+  // unmuted preference would make the browser refuse autoplay (PB-3).
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const snapshot = await resumeStore.load();
-      if (cancelled || !snapshot) return;
-      lastResumeRef.current = snapshot;
-      setMuted(snapshot.muted);
-      setCaptionsOn(snapshot.captionsOn);
-
       if (initialContentId) {
-        if (snapshot.contentId === initialContentId && isResumable(snapshot)) {
-          setResumeOffer(snapshot);
-          patchLaunchDiagnostics({ resumePositionMs: snapshot.positionMs });
+        // A shared link resumes only its own series, and never touches the
+        // resume points of the others (VIR-2).
+        const target = feedRef.current.ordered.find((item) => item.id === initialContentId);
+        if (!target) return;
+        const saved = await resumeStore.loadForSeries(target.seriesId);
+        if (cancelled || !saved) return;
+        lastResumeRef.current = saved;
+        setCaptionsOn(saved.captionsOn);
+        if (saved.contentId === initialContentId && isResumable(saved)) {
+          resumeLandingId.current = saved.contentId;
+          setResumeOffer({ contentId: saved.contentId, positionMs: saved.positionMs, reason: "resume" });
+          patchLaunchDiagnostics({ resumePositionMs: saved.positionMs });
         }
         return;
       }
-      if (!isResumable(snapshot)) return;
 
-      const listed = itemsRef.current.findIndex((item) => item.id === snapshot.contentId);
+      const snapshot = await resumeStore.load();
+      if (cancelled || !snapshot) return;
+      lastResumeRef.current = snapshot;
+      setCaptionsOn(snapshot.captionsOn);
+
+      const nextEpisodeIn = (data: FeedData) => (contentId: string) => {
+        const saved = data.ordered.find((item) => item.id === contentId);
+        return saved ? (data.source.getNextEpisode(saved)?.id ?? null) : null;
+      };
+      let data = feedRef.current;
+      let landing = resumeLanding(snapshot, nextEpisodeIn(data));
+      // The first-frame catalog may know neither the saved episode nor the
+      // one after it (VIR-1): the full catalog decides.
+      const needsCatalog =
+        !data.complete &&
+        (landing === null
+          ? isNearEnd(snapshot)
+          : !data.ordered.some((item) => item.id === landing?.contentId));
+      if (needsCatalog) {
+        const full = await loadCatalog();
+        if (cancelled || !full) return;
+        data = full;
+        landing = resumeLanding(snapshot, nextEpisodeIn(full));
+      }
+      // Nothing to continue, or the viewer already moved on.
+      if (!landing || indexRef.current !== 0) return;
+      const target = landing;
+
+      const listed = itemsRef.current.findIndex((item) => item.id === target.contentId);
       if (listed >= 0) {
         setIndex(listed);
       } else {
-        // The page holds only the first frame: the resumed episode comes from
-        // the catalog and opens a page of its own.
-        const data = await loadCatalog();
-        if (cancelled || !data || indexRef.current !== 0) return;
-        const resumed = data.ordered.find((item) => item.id === snapshot.contentId);
-        if (!resumed) return;
-        setItems((prev) => pageStartingAt(data.source, resumed, prev));
+        // The page holds only the first frame: the episode comes from the
+        // catalog and opens a page of its own.
+        const landed = data.ordered.find((item) => item.id === target.contentId);
+        if (!landed) return;
+        setItems((prev) => pageStartingAt(data.source, landed, prev));
         setIndex(0);
       }
-      setResumeOffer(snapshot);
-      patchLaunchDiagnostics({ resumePositionMs: snapshot.positionMs });
+      resumeLandingId.current = target.contentId;
+      setResumeOffer(target);
+      patchLaunchDiagnostics({ resumePositionMs: target.positionMs });
     })();
     return () => {
       cancelled = true;
@@ -466,6 +546,8 @@ export function FeedApp({
       content_id: current.id,
       series_id: current.seriesId,
       episode_id: current.episodeId,
+      episode_number: current.episodeNumber,
+      episode_count: episodeCountOf(feedRef.current.catalog, current),
       source: "feed",
     });
     analytics.track("content_impression", {
@@ -529,6 +611,8 @@ export function FeedApp({
         content_id: item.id,
         series_id: item.seriesId,
         episode_id: item.episodeId,
+        episode_number: item.episodeNumber,
+        episode_count: episodeCountOf(feedRef.current.catalog, item),
         position_ms: Math.round(positionMs),
         duration_ms: Math.round(durationMs),
         completion_percentage: Math.round(completion),
@@ -539,8 +623,24 @@ export function FeedApp({
     [analytics, anonymousUserId, progressThrottle, sessionId],
   );
 
+  /** series_complete once per episode, only for the series' last one (MP-7). */
+  const trackSeriesComplete = useCallback(
+    (item: ContentItem, via: "ended" | "swipe") => {
+      if (seriesCompleteSent.current.has(item.id)) return;
+      seriesCompleteSent.current.add(item.id);
+      analytics.track("series_complete", {
+        content_id: item.id,
+        series_id: item.seriesId,
+        episode_number: item.episodeNumber,
+        episode_count: episodeCountOf(feedRef.current.catalog, item),
+        via,
+      });
+    },
+    [analytics],
+  );
+
   const handleIndexChange = useCallback(
-    (next: number) => {
+    (next: number, kind: PendingTransition["kind"] = "swipe", nextItems: ContentItem[] = items) => {
       if (next === index) return;
       const from = items[index];
       if (from) {
@@ -552,6 +652,16 @@ export function FeedApp({
           episode_id: from.episodeId,
           completion_percentage: Math.round(watched * 100),
         });
+        // Leaving the last episode after watching nearly all of it finishes the series.
+        if (
+          finishedLastEpisode(
+            from.episodeNumber,
+            episodeCountOf(feedRef.current.catalog, from),
+            watched,
+          )
+        ) {
+          trackSeriesComplete(from, "swipe");
+        }
         const watchedPct = watched * 100;
         if (watchedPct > 0 && watchedPct < 40) {
           analytics.track("video_skipped", {
@@ -560,19 +670,23 @@ export function FeedApp({
           });
         }
       }
-      analytics.track("feed_swipe", {
-        direction: next > index ? "next" : "previous",
-        from_content_id: items[index]?.id ?? null,
-        to_content_id: items[next]?.id ?? null,
-      });
-      const to = items[next];
+      const to = nextItems[next];
+      if (kind === "swipe") {
+        analytics.track("feed_swipe", {
+          direction: next > index ? "next" : "previous",
+          from_content_id: items[index]?.id ?? null,
+          to_content_id: to?.id ?? null,
+        });
+      }
       if (to && contentOpenTracked.current !== to.id) {
         contentOpenTracked.current = to.id;
         analytics.track("content_open", {
           content_id: to.id,
           series_id: to.seriesId,
           episode_id: to.episodeId,
-          source: "feed_swipe",
+          episode_number: to.episodeNumber,
+          episode_count: episodeCountOf(feedRef.current.catalog, to),
+          source: kind === "swipe" ? "feed_swipe" : kind,
         });
         analytics.track("content_impression", {
           content_id: to.id,
@@ -580,15 +694,62 @@ export function FeedApp({
         });
       }
       perf.mark("episode_transition_started");
-      setSeriesEnded(false);
+      transitionRef.current = to
+        ? { toContentId: to.id, kind, startedAt: performance.now() }
+        : null;
+      setSeriesEnded(null);
       setResumeOffer(null);
       setSeekToMs(null);
       setAutoplayBlocked(false);
+      setPlaybackFailure(null);
       progressThrottle.reset();
+      if (nextItems !== items) setItems(nextItems);
       setIndex(next);
     },
-    [analytics, emitWatchProgress, index, items, perf, progressStore, progressThrottle],
+    [
+      analytics,
+      emitWatchProgress,
+      index,
+      items,
+      perf,
+      progressStore,
+      progressThrottle,
+      trackSeriesComplete,
+    ],
   );
+
+  // A failed episode stays on screen long enough to read why, then the feed
+  // moves on: to the next episode of the series when there is one (PB-5).
+  const skipFailedRef = useRef<(contentId: string) => void>(() => undefined);
+  skipFailedRef.current = (contentId: string) => {
+    const active = items[index];
+    if (!active || active.id !== contentId) return;
+    analytics.track("playback_error_skip", {
+      content_id: active.id,
+      series_id: active.seriesId,
+      episode_id: active.episodeId,
+    });
+    const placed = placeNextInSeries(feedRef.current.source, items, index);
+    if (placed.kind === "next_in_series") {
+      handleIndexChange(placed.nextIndex, "error_skip", placed.items);
+      return;
+    }
+    if (index < items.length - 1) {
+      handleIndexChange(index + 1, "error_skip");
+      return;
+    }
+    // Last listed slide: build the page, the extension effect adds slides.
+    setPlaybackFailure(null);
+    void ensureFeedPage();
+  };
+  useEffect(() => {
+    if (!playbackFailure || current?.id !== playbackFailure) return;
+    const timer = window.setTimeout(
+      () => skipFailedRef.current(playbackFailure),
+      ERROR_SKIP_DELAY_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [current?.id, playbackFailure]);
 
   const handleTimeUpdate = (item: ContentItem, positionMs: number, durationMs: number) => {
     progressStore.set(item.id, durationMs > 0 ? positionMs / durationMs : 0);
@@ -616,6 +777,8 @@ export function FeedApp({
       content_id: item.id,
       series_id: item.seriesId,
       episode_id: item.episodeId,
+      episode_number: item.episodeNumber,
+      episode_count: episodeCountOf(feedRef.current.catalog, item),
     });
     void persistResume({
       contentId: item.id,
@@ -662,17 +825,35 @@ export function FeedApp({
           });
         }
         perf.mark("episode_transition_started");
-        setSeriesEnded(false);
+        transitionRef.current = {
+          toContentId: placed.next.id,
+          kind: "auto_continue",
+          startedAt: performance.now(),
+        };
+        setSeriesEnded(null);
         setSeekToMs(null);
+        setPlaybackFailure(null);
         if (placed.items !== itemsRef.current) setItems(placed.items);
         setIndex(placed.nextIndex);
         return;
       }
-      analytics.track("series_complete", {
-        content_id: item.id,
-        series_id: item.seriesId,
-      });
-      setSeriesEnded(true);
+      // Only the last episode completes a series; a missing or unready next
+      // episode is reported as what it is (MP-7).
+      const ending = classifySeriesEnd(
+        item.episodeNumber,
+        episodeCountOf(feedRef.current.catalog, item),
+      );
+      if (ending === "series_complete") {
+        trackSeriesComplete(item, "ended");
+      } else {
+        analytics.track("series_unavailable_next", {
+          content_id: item.id,
+          series_id: item.seriesId,
+          episode_number: item.episodeNumber,
+          episode_count: episodeCountOf(feedRef.current.catalog, item),
+        });
+      }
+      setSeriesEnded(ending);
     })();
   };
 
@@ -723,41 +904,41 @@ export function FeedApp({
 
   const handleIntentChip = useCallback(
     async (chipId: IntentChipId) => {
-      const active = items[index];
+      const tapped = itemsRef.current[indexRef.current];
       const data = (await loadCatalog()) ?? feedRef.current;
       const resolution = await intentFor(data).resolveChip(chipId, {
-        contentId: active?.id ?? null,
-        seriesId: active?.seriesId ?? null,
-        genres: active?.genres ?? [],
-        tropes: active?.tropes ?? [],
+        contentId: tapped?.id ?? null,
+        seriesId: tapped?.seriesId ?? null,
+        genres: tapped?.genres ?? [],
+        tropes: tapped?.tropes ?? [],
       });
       setIntentOpen(false);
 
-      if (resolution.candidates.length === 0 || !active) return;
+      if (resolution.candidates.length === 0) return;
 
       const byId = new Map(data.ordered.map((item) => [item.id, item]));
       const intentItems = resolution.candidates
         .map((candidate) => byId.get(candidate.contentId))
         .filter((entry): entry is ContentItem => Boolean(entry));
 
-      setItems((prev) => {
-        const head = prev[index];
-        if (!head) return prev;
-        const rest = intentItems.filter((item) => item.id !== head.id);
-        const restIds = new Set(rest.map((item) => item.id));
-        const leftovers = prev
-          .slice(index + 1)
-          .filter((item) => item.id !== head.id && !restIds.has(item.id));
-        return [head, ...rest, ...leftovers];
-      });
+      // The fetch can take seconds: the page is built around the episode on
+      // screen now, not the one on screen when the chip was tapped (R2).
+      const headIndex = indexRef.current;
+      const head = itemsRef.current[headIndex];
+      if (!head) return;
+      userReorderedRef.current = true;
+      setItems((prev) => applyIntentPage(prev, head.id, intentItems));
       setIndex(0);
     },
-    [index, intentFor, items, loadCatalog],
+    [intentFor, loadCatalog],
   );
 
   const showGate = shouldShowPlayGate(autoplayBlocked, userStartedPlayback);
 
   const handlePlayGate = () => {
+    if (!firstPlayMarked.current && gateTapAt.current === null) {
+      gateTapAt.current = performance.now();
+    }
     setUserStartedPlayback(true);
     setAutoplayBlocked(false);
     analytics.track("first_play_attempted", {
@@ -886,11 +1067,19 @@ export function FeedApp({
         error_code: code,
         reason,
       });
-      // Nothing is playing: the viewer needs somewhere to go next.
+      // Only the episode on screen moves the feed; a neighbour never does
+      // (PB-4, R3). The skip waits until the error has been read (PB-5).
+      if (item.id !== current?.id) return;
       scheduleFeedPage();
-      if (index < items.length - 1) {
-        setIndex(index + 1);
-      }
+      setPlaybackFailure(item.id);
+    },
+    onRetry: (item) => {
+      analytics.track("playback_retry", {
+        content_id: item.id,
+        series_id: item.seriesId,
+        episode_id: item.episodeId,
+      });
+      setPlaybackFailure(null);
     },
     onPlayAttempt: (item) => {
       patchLaunchDiagnostics({
@@ -905,11 +1094,25 @@ export function FeedApp({
         source: "autoplay",
       });
     },
-    onFirstFrameProxy: (item) => {
-      if (item.id !== current?.id) return;
-      perf.mark("episode_first_frame_played");
+    onPlay: () => {
+      // Playback requested and unpaused; no frame yet, so no speed metric here.
+      setAutoplayBlocked(false);
+      setUserStartedPlayback(true);
     },
-    onPlay: (item) => {
+    onMutedFallback: (item) => {
+      setMuted(true);
+      analytics.track("autoplay_muted_fallback", {
+        content_id: item.id,
+        series_id: item.seriesId,
+      });
+    },
+    onSeekApplied: (item) => {
+      if (item.id !== current?.id) return;
+      // Applied once: a later canplay must never replay it (PB-2).
+      setSeekToMs(null);
+    },
+    onPlaying: (item, info) => {
+      if (item.id !== current?.id) return;
       setAutoplayBlocked(false);
       setUserStartedPlayback(true);
       patchLaunchDiagnostics({
@@ -920,11 +1123,17 @@ export function FeedApp({
         episodeId: item.episodeId,
         sourceUri: item.videoUrl,
       });
-      if (!firstPlayMarked.current) {
+      if (info.firstFrame) perf.mark("episode_first_frame_played");
+      if (info.firstFrame && !firstPlayMarked.current) {
         firstPlayMarked.current = true;
         perf.mark("video_play_started");
         perf.mark("first_meaningful_play");
         const ttfp = perf.timeToFirstPlay();
+        const startMode = firstPlayStartMode({
+          gateTapped: gateTapAt.current !== null,
+          resumeLandingId: resumeLandingId.current,
+          contentId: item.id,
+        });
         patchLaunchDiagnostics({
           firstMeaningfulPlayTs: perf.get("first_meaningful_play"),
           timeToFirstPlayMs: ttfp,
@@ -934,6 +1143,14 @@ export function FeedApp({
           series_id: item.seriesId,
           episode_id: item.episodeId,
           time_to_first_play: ttfp,
+          // docs/standard.md §3 judges time_to_first_play on start_mode = autoplay.
+          start_mode: startMode,
+          autoplay_blocked: autoplayBlockedBeforeFirstPlay.current,
+          gate_tap_to_play_ms:
+            gateTapAt.current === null
+              ? null
+              : Math.round(performance.now() - gateTapAt.current),
+          frame_source: info.frameSource,
           page_start_ts: perf.get("page_start"),
           video_load_started_ts: perf.get("video_load_started"),
           video_can_play_ts: perf.get("video_can_play"),
@@ -955,10 +1172,23 @@ export function FeedApp({
         // The episode is playing: the rest of the feed can now be prepared.
         scheduleFeedPage();
       }
+      // Swipe latency ends at the first real frame of the episode swiped to,
+      // measured on one clock (MP-1).
+      const transition = transitionRef.current;
+      const transitionMs =
+        info.firstFrame && transition?.toContentId === item.id
+          ? Math.round(performance.now() - transition.startedAt)
+          : null;
+      if (info.firstFrame && transition?.toContentId === item.id) transitionRef.current = null;
       analytics.track("play", {
         content_id: item.id,
         series_id: item.seriesId,
         episode_id: item.episodeId,
+        first_frame: info.firstFrame,
+        frame_source: info.frameSource,
+        swipe_to_play_ms: transition?.kind === "swipe" ? transitionMs : null,
+        transition_kind: transitionMs === null ? null : (transition?.kind ?? null),
+        transition_to_play_ms: transitionMs,
       });
     },
     onPause: () => {
@@ -982,6 +1212,7 @@ export function FeedApp({
     onAutoplayBlocked: () => {
       // Waiting for a tap: the main thread is free for the feed page.
       scheduleFeedPage();
+      if (!firstPlayMarked.current) autoplayBlockedBeforeFirstPlay.current = true;
       if (!userStartedPlayback) {
         setAutoplayBlocked(true);
         patchLaunchDiagnostics({
@@ -1028,18 +1259,21 @@ export function FeedApp({
           <ContinueStrip
             seriesTitle={current.seriesTitle}
             episodeLabel={`Episode ${current.episodeNumber}`}
+            label={resumeOffer.reason === "next_episode" ? "Up next" : "Continue story"}
             onContinue={() => {
-              setSeekToMs(resumeOffer.positionMs);
+              // Seeks right away when the episode is loaded (PB-2).
+              if (resumeOffer.positionMs > 0) setSeekToMs(resumeOffer.positionMs);
               setResumeOffer(null);
               analytics.track("episode_resume_started", {
                 session_id: sessionId,
                 content_id: resumeOffer.contentId,
                 position_ms: resumeOffer.positionMs,
+                reason: resumeOffer.reason,
               });
               const resumeIndex = items.findIndex(
                 (item) => item.id === resumeOffer.contentId,
               );
-              if (resumeIndex >= 0) setIndex(resumeIndex);
+              if (resumeIndex >= 0 && resumeIndex !== index) setIndex(resumeIndex);
             }}
           />
         ) : null}
@@ -1047,10 +1281,11 @@ export function FeedApp({
         {seriesEnded && current ? (
           <SeriesEnd
             seriesTitle={current.seriesTitle}
+            kind={seriesEnded}
             onDismiss={() => {
-              setSeriesEnded(false);
+              setSeriesEnded(null);
               if (index < items.length - 1) {
-                setIndex(index + 1);
+                handleIndexChange(index + 1);
               }
             }}
           />

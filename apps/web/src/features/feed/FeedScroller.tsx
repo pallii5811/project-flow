@@ -10,8 +10,12 @@ import {
 } from "react";
 
 import { FeedItemView, FeedSlidePlaceholder, type FeedItemHandlers } from "./FeedItemView";
+import { isAtSlide, settledIndex } from "./feedLogic";
 import type { ProgressStore } from "./progressStore";
 import styles from "./feed.module.css";
+
+/** Without a `scrollend` event, scrolling counts as settled after this quiet time. */
+const SCROLL_SETTLE_FALLBACK_MS = 150;
 
 type FeedScrollerProps = {
   items: ContentItem[];
@@ -65,6 +69,9 @@ export function FeedScroller({
     if (!root) return;
     const target = root.children.item(index) as HTMLElement | null;
     if (!target) return;
+    // Already there (the viewer's own swipe got here): a forced jump would
+    // fight momentum and scroll-snap (PB-6).
+    if (isAtSlide(root.scrollTop, target.offsetTop)) return;
     scrollingFromProp.current = true;
     target.scrollIntoView({ behavior: "auto", block: "start" });
     requestAnimationFrame(() => {
@@ -72,21 +79,34 @@ export function FeedScroller({
     });
   }, [index, items.length]);
 
+  // The active slide changes once the gesture is over (scrollend), never at
+  // the halfway mark while the finger is still down (PB-6).
   useEffect(() => {
     const root = localRef.current;
     if (!root) return;
+    const supportsScrollEnd = "onscrollend" in window;
+    let settleTimer: number | null = null;
+
+    const commit = () => {
+      settleTimer = null;
+      if (scrollingFromProp.current) return;
+      const next = settledIndex(root.scrollTop, root.clientHeight, items.length);
+      if (next !== null && next !== index) onIndexChange(next);
+    };
 
     const onScroll = () => {
-      if (scrollingFromProp.current) return;
-      const height = root.clientHeight || 1;
-      const next = Math.round(root.scrollTop / height);
-      if (next !== index && next >= 0 && next < items.length) {
-        onIndexChange(next);
-      }
+      if (supportsScrollEnd || scrollingFromProp.current) return;
+      if (settleTimer !== null) window.clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(commit, SCROLL_SETTLE_FALLBACK_MS);
     };
 
     root.addEventListener("scroll", onScroll, { passive: true });
-    return () => root.removeEventListener("scroll", onScroll);
+    if (supportsScrollEnd) root.addEventListener("scrollend", commit);
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      if (supportsScrollEnd) root.removeEventListener("scrollend", commit);
+      if (settleTimer !== null) window.clearTimeout(settleTimer);
+    };
   }, [index, items.length, onIndexChange]);
 
   useEffect(() => {

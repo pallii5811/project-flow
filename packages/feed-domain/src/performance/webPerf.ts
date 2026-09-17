@@ -27,8 +27,8 @@ export type WebPerfTiming = {
 function navigationPageStartMs(fallbackNow: () => number): number {
   if (typeof performance === "undefined") return fallbackNow();
   // Navigation Timing Level 2: timeOrigin is the document navigation start.
-  // Limitation: browsers do not expose an exact decoded-frame timestamp;
-  // first_meaningful_play uses the HTMLMediaElement `play` event as proxy.
+  // first_meaningful_play is marked at the first frame on screen:
+  // requestVideoFrameCallback where it exists, the `playing` event otherwise.
   return performance.timeOrigin;
 }
 

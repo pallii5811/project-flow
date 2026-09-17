@@ -49,6 +49,13 @@ export { createDeterministicFeedSource } from "./source/deterministicFeedSource"
 
 export type { NextEpisodeResolution } from "./continuation/resolveNextInSeries";
 export { resolveNextInSeries } from "./continuation/resolveNextInSeries";
+export type { SeriesEndKind } from "./continuation/seriesEnd";
+export {
+  SERIES_FINISHED_FRACTION,
+  classifySeriesEnd,
+  finishedLastEpisode,
+  isLastEpisode,
+} from "./continuation/seriesEnd";
 
 export {
   FEED_CATALOG_PAYLOAD_VERSION,
@@ -66,6 +73,7 @@ export {
   FEED_EXTEND_WITHIN,
   FEED_PAGE_SIZE,
   FEED_RENDER_RADIUS,
+  applyIntentPage,
   applyRecommendedPage,
   extendFeedPage,
   needsExtension,
@@ -78,13 +86,23 @@ export type { PlacedNextEpisode } from "./state/feedPage";
 export type { FeedWindow } from "./state/feedLogic";
 export { getFeedWindow, resolveContinuation, getPrefetchIds } from "./state/feedLogic";
 
-export type { ResumeSnapshot, ResumeStore } from "./resume/resumeStore";
+export type { ResumeLanding, ResumeSnapshot, ResumeStore } from "./resume/resumeStore";
 export {
+  RESUME_MIN_POSITION_MS,
+  RESUME_SERIES_CAP,
   createMemoryResumeStore,
-  shouldPersistResume,
+  isNearEnd,
   isResumable,
+  resumeLanding,
+  shouldPersistResume,
+  upsertResumeEntry,
 } from "./resume/resumeStore";
-export { createLocalStorageResumeStore } from "./resume/localStorageResumeStore";
+export {
+  LEGACY_RESUME_STORAGE_KEY,
+  RESUME_STORAGE_KEY,
+  createLocalStorageResumeStore,
+  readResumeEntries,
+} from "./resume/localStorageResumeStore";
 
 export {
   slugify,

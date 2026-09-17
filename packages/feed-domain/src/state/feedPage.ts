@@ -63,6 +63,28 @@ export function applyRecommendedPage(
   return page;
 }
 
+/**
+ * The page an intent chip builds: the episode on screen first, then the
+ * chip's results, then what was listed after it. The episode on screen is
+ * found by id, because the chip's results arrive after a fetch during which
+ * the viewer may have moved (R2). Unknown head: the list stays as it is.
+ */
+export function applyIntentPage(
+  items: ContentItem[],
+  headId: string,
+  intentItems: ContentItem[],
+): ContentItem[] {
+  const at = items.findIndex((item) => item.id === headId);
+  const head = items[at];
+  if (!head) return items;
+  const rest = intentItems.filter((item) => item.id !== head.id);
+  const restIds = new Set(rest.map((item) => item.id));
+  const leftovers = items
+    .slice(at + 1)
+    .filter((item) => item.id !== head.id && !restIds.has(item.id));
+  return [head, ...rest, ...leftovers];
+}
+
 export type PlacedNextEpisode =
   | { kind: "next_in_series"; items: ContentItem[]; nextIndex: number; next: ContentItem }
   | { kind: "series_complete" };

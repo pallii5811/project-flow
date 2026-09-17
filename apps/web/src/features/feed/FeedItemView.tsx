@@ -8,9 +8,10 @@ import {
   selectCaptionTrack,
   type ContentItem,
 } from "@project-flow/feed-domain";
-import { memo, useEffect, useMemo, useState, type ReactElement } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 
 import { Html5PlayerAdapter } from "@/features/player/Html5PlayerAdapter";
+import type { PlayingInfo } from "@/features/player/types";
 
 import { ActionRail } from "./ActionRail";
 import { ContentOverlay } from "./ContentOverlay";
@@ -41,12 +42,17 @@ export type FeedItemHandlers = {
   onMetadataReady: (item: ContentItem) => void;
   onTimeUpdate: (item: ContentItem, positionMs: number, durationMs: number) => void;
   onEnded: (item: ContentItem) => void;
+  /** The active episode cannot play. The feed skips it after a readable delay. */
   onError: (item: ContentItem, code: string, reason: string) => void;
+  /** The viewer asked to try a failed episode again. */
+  onRetry: (item: ContentItem) => void;
   onPlay: (item: ContentItem) => void;
+  onPlaying: (item: ContentItem, info: PlayingInfo) => void;
   onPause: (item: ContentItem) => void;
   onPlayAttempt: (item: ContentItem) => void;
-  onFirstFrameProxy: (item: ContentItem) => void;
   onAutoplayBlocked: () => void;
+  onMutedFallback: (item: ContentItem) => void;
+  onSeekApplied: (item: ContentItem) => void;
   onBufferingStart: (item: ContentItem) => void;
   onBufferingEnd: (item: ContentItem) => void;
 };
@@ -82,8 +88,17 @@ function FeedItemViewImpl({
 }: FeedItemViewProps): ReactElement {
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
+  /** Stuck because the browser is offline; clears when playback resumes. */
+  const [offline, setOffline] = useState(false);
+  /** Bumped to mount a fresh player after a failure (PB-5). */
+  const [attempt, setAttempt] = useState(0);
 
-  const resolved = useMemo(() => videoProvider.resolve(item.playback), [item.playback]);
+  // Checked against the clock each time the slide becomes active: rights can
+  // expire during a session.
+  const resolved = useMemo(() => {
+    void active; // resolved again at each activation, against the current clock
+    return videoProvider.resolve(item.playback);
+  }, [item.playback, active]);
 
   const display = useMemo(() => resolveDisplayCopy(item, locale), [item, locale]);
 
@@ -98,8 +113,6 @@ function FeedItemViewImpl({
   }, [captionTrack]);
 
   useEffect(() => {
-    setPlaying(false);
-    setFailed(false);
     handlers.onMetadataReady(item);
     if (resolved.ok) {
       logContentEvent({
@@ -107,8 +120,14 @@ function FeedItemViewImpl({
         contentId: item.id,
         seriesId: item.seriesId,
       });
-      return;
     }
+    // Once per episode: item identity follows item.id.
+  }, [item.id]);
+
+  // An episode that cannot even resolve fails only when the viewer is on it:
+  // a neighbour warming up must never move the feed (PB-4, R3).
+  useEffect(() => {
+    if (!active || resolved.ok) return;
     setFailed(true);
     handlers.onError(item, resolved.error.code, resolved.error.reason);
     logContentEvent({
@@ -117,8 +136,35 @@ function FeedItemViewImpl({
       code: resolved.error.code,
       detail: resolved.error.reason,
     });
-    // Once per episode, as before: item identity follows item.id.
-  }, [item.id, item.seriesId, resolved]);
+  }, [active, resolved]);
+
+  const failedRef = useRef(failed);
+  failedRef.current = failed;
+  const resolvableRef = useRef(resolved.ok);
+  resolvableRef.current = resolved.ok;
+
+  /** A failed but resolvable episode gets a fresh player (PB-5). */
+  const retryIfFailed = () => {
+    setOffline(false);
+    if (!failedRef.current || !resolvableRef.current) return;
+    setFailed(false);
+    setPlaying(false);
+    setAttempt((count) => count + 1);
+  };
+
+  // Coming back to a failed episode tries it again.
+  const wasActive = useRef(active);
+  useEffect(() => {
+    const becameActive = active && !wasActive.current;
+    wasActive.current = active;
+    if (becameActive) retryIfFailed();
+  }, [active]);
+
+  // The network is back: a failed episode gets another chance.
+  useEffect(() => {
+    window.addEventListener("online", retryIfFailed);
+    return () => window.removeEventListener("online", retryIfFailed);
+  }, []);
 
   const showPoster = !playing || failed || !active;
   const playableUrl = resolved.ok ? resolved.playback.url : "";
@@ -133,6 +179,14 @@ function FeedItemViewImpl({
       return;
     }
     handlers.onTogglePlayPause();
+  };
+
+  const handleRetry = () => {
+    handlers.onRetry(item);
+    setOffline(false);
+    setPlaying(false);
+    setFailed(false);
+    setAttempt((count) => count + 1);
   };
 
   return (
@@ -167,6 +221,7 @@ function FeedItemViewImpl({
         />
         {mountPlayer ? (
           <Html5PlayerAdapter
+            key={attempt}
             source={{
               uri: playableUrl,
               poster: posterUrl,
@@ -195,18 +250,25 @@ function FeedItemViewImpl({
                 setPlaying(false);
                 handlers.onError(item, classified.code, classified.reason);
               },
-              onPlay: () => {
+              onPlay: () => handlers.onPlay(item),
+              onPlaying: (info) => {
+                // The poster leaves when a frame is on screen, not at play().
                 setPlaying(true);
                 setFailed(false);
-                handlers.onPlay(item);
+                setOffline(false);
+                handlers.onPlaying(item, info);
               },
               onPause: () => {
                 setPlaying(false);
                 handlers.onPause(item);
               },
               onPlayAttempt: () => handlers.onPlayAttempt(item),
-              onFirstFrameProxy: () => handlers.onFirstFrameProxy(item),
               onAutoplayBlocked: handlers.onAutoplayBlocked,
+              onMutedFallback: () => handlers.onMutedFallback(item),
+              onSeekApplied: () => handlers.onSeekApplied(item),
+              onNetworkWait: () => {
+                if (active) setOffline(true);
+              },
               onBufferingStart: () => handlers.onBufferingStart(item),
               onBufferingEnd: () => handlers.onBufferingEnd(item),
             }}
@@ -237,7 +299,20 @@ function FeedItemViewImpl({
       {active && failed ? (
         <div className={styles.mediaFail} role="status">
           <p className={styles.mediaFailText}>
-            This episode couldn’t play. Swipe for the next story.
+            This episode couldn’t play. Moving to the next one…
+          </p>
+          {resolved.ok ? (
+            <button type="button" className={styles.mediaFailRetry} onClick={handleRetry}>
+              Try again
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {active && offline && !failed ? (
+        <div className={styles.mediaFail} role="status">
+          <p className={styles.mediaFailText}>
+            You’re offline. The episode continues when you’re back.
           </p>
         </div>
       ) : null}

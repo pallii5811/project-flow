@@ -4,6 +4,38 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-17 — Playback never ends on a poster; resume per series; metrics on the first frame
+
+**Decision:** Every activation of an episode ends playing, at the tap-to-play gate, or in a visible error followed by a move. The player (`apps/web/src/features/player`, decisions pure in `playbackRecovery.ts`):
+
+- retries a failed network load by attaching the source again, after 1 s and 3 s; a 4xx answer (except 408/429) fails at once;
+- while the browser is offline it spends no retries: it shows "You're offline" and attaches again on the `online` event;
+- a slide whose source died while it was only warming is attached again when it becomes active;
+- a watchdog re-attaches an active episode that is not playing and has received no media for 10 s, then fails it. It counts from the last playlist, segment or frame, so a slow phone that keeps receiving data is never cut off;
+- a failed episode shows "This episode couldn't play" with Try again for 2.5 s, then the feed moves to the next episode of the series (or the next slide). Only the episode on screen can move the feed. Coming back to a failed episode, or the network returning, tries it again.
+
+Sound: every visit starts muted, whatever was saved; a `play()` refused because sound needs a gesture retries muted.
+
+Resume: one point per series (`project-flow.resume.v2`, 20 series at most, the old single key is read and migrated). The home page lands on the most recent one: at the saved position, or on the next episode of the series when the saved one was finished or over 92% watched. A shared link reads only its own series.
+
+Metrics: `first_meaningful_play` and `play` are sent at the first frame on screen (`requestVideoFrameCallback`, else `playing`), never at `play()`. `first_meaningful_play` carries `start_mode` (autoplay, play_gate, resume), `autoplay_blocked` and `gate_tap_to_play_ms`; `play` carries `swipe_to_play_ms`. Waiting before the first frame is not `buffer_start`. `series_complete` is sent only when the series' last episode ends or is left at 95% watched; an episode whose successor is missing sends `series_unavailable_next`. Content events carry `episode_number` and `episode_count`, and every event's `app_version` is the git commit of the build.
+
+The scroller commits the active slide at `scrollend` (a 150 ms quiet period where the event does not exist), not at the halfway mark mid-gesture.
+
+**Why:** Measured on 8b38a2f with `npm run e2e:web`: an episode that warmed while offline stayed at 0 s forever after the network came back; an episode whose playlist answered 404 showed no message and never moved on (20 s watched); Continue did not seek (0.87 s instead of 5 s); a viewer who had once unmuted got a paused first episode; a viewer who finished episode 2 reopened on episode 1. `time_to_first_play` and swipe latency were taken at `play()`, before any frame, and mixed gate taps with autoplay. Numbers in `docs/standard.md` §3.
+
+**Consequences:**
+
+- While offline an episode waits instead of skipping: skipping would run through the whole feed with nothing able to play.
+- The active slide changes when a swipe settles, so on a phone playback starts after the snap animation; `swipe_to_play_ms` is measured from that commit, not from the finger.
+- A returning viewer whose saved episode is not in the first frame waits for `catalog/feed.json` before the landing episode plays (as a resumed episode already did).
+- `scripts/link-hls-engine.mjs` warns instead of failing when no exported page opens on an HLS episode; it still fails when a page carries the warmup script and cannot be linked.
+- First-load JavaScript 127 → 130 kB.
+
+**Revisit:** When real phones and Safari's native player are tested (the recovery is proven in headless Chrome only); when beta data shows how often the watchdog fires; when series manifests give a catalog version to put on events (`catalog_version` is not sent yet).
+
+---
+
 ## 2026-09-17 — Feed at scale: windowed slides, catalog as static JSON, early hls.js
 
 **Decision:** The feed list holds a page of 40 episodes (`FEED_PAGE_SIZE`), extended from catalog order when the viewer is within 10 of its end; it never holds the whole catalog. Only slides in [index−2, index+2] render poster and player; the rest are empty boxes that keep their scroll-snap point, and non-active posters use `loading="lazy"`. Each page's HTML carries only the target episode and the next one, inlined, so first play never waits for anything else. The catalog reaches the browser as `catalog/feed.json`, written at build time by a `force-static` route handler with only the fields the feed shows, and fetched after the first `playing` event (earlier only when something needs it: a refused autoplay, a playback error, a resumed episode outside the page, an intent chip, the end of the last listed slide; at the latest after 20 s). The recommended re-rank runs on that catalog when the main thread is idle and only replaces slides after the next one. Playback progress lives in a small store read by the progress bar only, and slides are memoized with stable handlers. hls.js is no longer discovered after hydration: an inline script preloads its chunk and the episode playlist (the chunk name is written into the export by `scripts/link-hls-engine.mjs`), and the player module starts the import at load; Safari and browsers without Media Source skip both. The TypeScript catalog in `packages/feed-domain` stays the source until series manifests replace it.

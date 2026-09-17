@@ -415,9 +415,30 @@
   z-index: 4;
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 16px;
   padding: 32px;
   text-align: center;
   pointer-events: none;
+}
+
+.mediaFailRetry {
+  pointer-events: auto;
+  justify-self: center;
+  min-height: 44px;
+  padding: 0 20px;
+  border: 1px solid rgba(247, 245, 242, 0.5);
+  border-radius: 999px;
+  background: rgba(8, 8, 10, 0.45);
+  color: rgba(247, 245, 242, 0.92);
+  font-family: var(--font-body), sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mediaFailRetry:active {
+  transform: scale(0.97);
 }
 
 .mediaFailText {

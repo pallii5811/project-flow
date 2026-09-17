@@ -11,13 +11,14 @@ episodes free, then paywall with coins or subscriptions of up to $19.99 a week.
 | Our rule                                                                        | Status 2026-09-16                                                                                                                                                                                      |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Every episode free, forever. No coins, unlocks or tasks                         | Holds by design: no payment code exists                                                                                                                                                                |
-| Open a link and the episode is already playing. No install, login or onboarding | Holds, also at catalog scale: the page carries only the target episode and the next, so the HTML stays about 16–18 kB whatever the catalog size (measured with 600 and 3,000 generated episodes, `npm run e2e:web:scale`). On a throttled phone profile (1.6 Mbps, 150 ms, 4x CPU) first play takes about 8 s on the stand-in pack: not yet within target |
+| Open a link and the episode is already playing. No install, login or onboarding | Holds, also at catalog scale: the page carries only the target episode and the next, so the HTML stays about 16–18 kB whatever the catalog size (measured with 600 and 3,000 generated episodes, `npm run e2e:web:scale`). On a throttled phone profile (1.6 Mbps, 150 ms, 4x CPU) first play takes about 8 s on the stand-in pack: not yet within target. A viewer who once turned the sound on still gets autoplay: every visit starts muted (`npm run e2e:web`, under the phone rule that refuses sound without a gesture) |
 | Ads only inside the Ad Charter (section 2)                                      | Enforced in code: 26 tests, each rule proven by a sabotage run. No ads shown yet                                                                                                                       |
 | A shared link opens the exact episode, with a correct preview card              | Holds: absolute preview URLs; `npm run export:web` refuses an export pointing elsewhere (proven on a localhost build)                                                                                  |
 | Contextual ads only, no personal profiling                                      | Holds by design                                                                                                                                                                                        |
 | Picture adapts to the network; nothing downloaded beyond current + next episode | Holds on the stand-in pack: HLS, 2 s segments; at a cold open the next episode fetches only its first 4 s and nothing beyond it is fetched (`npm run e2e:web`). At open only 3 posters are fetched and at most 5 slides hold a poster or a player, whatever the catalog size (`npm run e2e:web:scale`). Safari's native path is not tested yet |
 | Subtitles in the viewer's language                                              | Partial: English, and Spanish on one episode                                                                                                                                                           |
-| Reasons to return tomorrow (follow survives reload, new-episode alerts)         | **Not yet.** Like and follow live in memory only                                                                                                                                                       |
+| Reasons to return tomorrow (follow survives reload, new-episode alerts)         | **Partial.** The place in a story survives reload, one per series (a shared link into another series keeps it), and a viewer who finished an episode reopens on the next one (`npm run e2e:web`). Like and follow live in memory only; no new-episode alerts |
+| An episode never freezes on its poster                                          | Holds in headless Chrome: a network drop while the next episode warms recovers when the network is back, and an episode that cannot load shows why for 2.5 s, then moves on (`npm run e2e:web`, both red on 8b38a2f). Real phones, Safari's native player and flaky mobile networks not tested yet |
 
 A row turns green only with evidence: a test, a build artifact, or a production metric.
 
@@ -52,11 +53,11 @@ p75 in production unless stated otherwise.
 
 | Metric                                    | Target                           | Measured from                                                            |
 | ----------------------------------------- | -------------------------------- | ------------------------------------------------------------------------ |
-| Time to first play, cold open on 4G       | < 1.5 s (spec), aiming < 1.0 s   | `first_meaningful_play.time_to_first_play`                               |
-| Swipe to next episode playing             | < 300 ms                         | `feed_swipe` → `play`                                                    |
-| Rebuffering                               | < 1% of watch time               | `buffer_start` / `buffer_end`                                            |
-| Playback failures                         | < 0.5% of plays                  | `playback_error` / `play`                                                |
-| First-load JavaScript                     | ≤ 150 kB                         | `next build` output (127 kB on 2026-09-17); the catalog is not in it, it is `catalog/feed.json`, fetched after first play |
+| Time to first play, cold open on 4G       | < 1.5 s (spec), aiming < 1.0 s   | `first_meaningful_play.time_to_first_play` where `start_mode` = `autoplay`; stops at the first frame on screen (`frame_source`), not at `play()` |
+| Swipe to next episode playing             | < 300 ms                         | `play.swipe_to_play_ms`: from the swipe to the first frame of the episode swiped to, one clock |
+| Rebuffering                               | < 1% of watch time               | `buffer_start` / `buffer_end`, after the first frame of each episode (startup waiting is not rebuffering) |
+| Playback failures                         | < 0.5% of plays                  | `playback_error` / `play` with `first_frame` = true                      |
+| First-load JavaScript                     | ≤ 150 kB                         | `next build` output (130 kB on 2026-09-17, playback recovery included); the catalog is not in it, it is `catalog/feed.json`, fetched after first play |
 | Data per watched minute at lowest quality | ≤ 5 MB                           | `scripts/package-episode.mjs` refuses more (stand-in pack: 0.95–1.02 MB) |
 | Preload                                   | current + first 4 s of next only | `npm run e2e:web` fails otherwise                                        |
 | Feed at catalog scale                     | ≤ 6 posters at open, ≤ 5 slides with media, HTML ≤ 50 kB, feed list ≤ 120 slides after 47 swipes | `npm run build:web:stress && npm run e2e:web:scale` fails otherwise |
@@ -84,6 +85,21 @@ At 3,000 generated episodes the after column holds (3 posters, 16 / 18 kB HTML, 
 after first play. On the throttled profile with the normal catalog, the hls.js download
 now starts at about 0.6 s instead of 3.5 s, together with the episode playlist (5.5 s
 before). Sharding the catalog file per series is left to the series-manifest batch.
+
+Playback recovery run, 2026-09-17, same setup, `npm run e2e:web` against the export of
+8b38a2f (built in a temporary worktree) and against the branch that fixes it:
+
+| Check                                                         | 8b38a2f                              | After                          |
+| ------------------------------------------------------------- | ------------------------------------ | ------------------------------ |
+| Continue on the resume offer (saved at 5 s)                   | 0.87 s: no seek                      | 5.80 s                         |
+| Returning viewer who once unmuted, 3 s after open             | paused at 0 s, sound on              | playing at 3.0 s, muted        |
+| Returning after finishing episode 2                           | lands on episode 1, no offer         | episode 3 with its offer       |
+| Offline 12 s while episode 3 warms, back online, swipe to it  | stuck at 0 s for 15 s, no message    | playing after 102 ms           |
+| Episode whose playlist answers 404                            | no error, no skip within 20 s        | error shown 2.5 s, then episode 4 |
+
+The autoplay rule of phones is emulated in the page (headless Chrome plays sound without a
+gesture whatever `--autoplay-policy` says). The error skip and the offline recovery are
+measured on localhost; a real mobile network is untested.
 
 ## 4. Definition of done
 

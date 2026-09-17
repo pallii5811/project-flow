@@ -1,4 +1,4 @@
-/* global window, document, performance, HTMLVideoElement, KeyboardEvent */
+/* global window, document, performance, DOMException, HTMLMediaElement, HTMLVideoElement, KeyboardEvent */
 /**
  * Real-browser check of the consumer path on the static export
  * (docs/standard.md §4, "a real browser run of open → play → swipe").
@@ -22,6 +22,14 @@
  *   8. no console errors on the way.
  * With --scale also: a deep link far into the catalog plays, and swiping
  * through the feed extends it without ever holding the whole catalog.
+ *
+ * Playback recovery (docs/decisions.md, "Playback never ends on a poster"):
+ *   9. Continue on the resume offer really seeks to the saved position;
+ *  10. a viewer who once unmuted still gets autoplay (muted) on return;
+ *  11. a returning viewer who finished an episode lands on the next one;
+ *  12. going offline while the next episode warms, then back online, still
+ *      plays it (or shows the error and skips);
+ *  13. an episode that cannot load shows the error, then skips on its own.
  */
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
@@ -32,7 +40,13 @@ import { chromium } from "playwright-core";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const SCALE = process.argv.includes("--scale");
 const THROTTLE = process.argv.includes("--throttle");
-const EXPORT_DIR = SCALE ? "apps/web/out-stress" : "apps/web/out";
+/** --export=<dir> serves another export, e.g. one built from master in a worktree. */
+const EXPORT_ARG = process.argv.find((arg) => arg.startsWith("--export="));
+const EXPORT_DIR = EXPORT_ARG
+  ? resolve(EXPORT_ARG.slice("--export=".length))
+  : SCALE
+    ? "apps/web/out-stress"
+    : "apps/web/out";
 const PORT = 3217;
 const BASE = `http://localhost:${PORT}`;
 /** Must match NEXT_EPISODE_WARM_SECONDS in apps/web/src/features/player/hlsSupport.ts. */
@@ -146,6 +160,68 @@ function swipeAndWaitForPlaying(expectedId) {
     };
     poll();
   });
+}
+
+/**
+ * The phone browsers' autoplay rule: sound needs a gesture first. A play()
+ * with sound before any user activation is refused with NotAllowedError, and
+ * unmuting a playing video without one pauses it (Chrome does both).
+ */
+function installPhoneAutoplayRule() {
+  // Not navigator.userActivation: Playwright's evaluate() counts as a gesture.
+  let gesture = false;
+  for (const type of ["pointerdown", "touchstart", "keydown", "click"]) {
+    window.addEventListener(
+      type,
+      (event) => {
+        if (event.isTrusted) gesture = true;
+      },
+      true,
+    );
+  }
+  const mutedProperty = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "muted");
+  Object.defineProperty(HTMLMediaElement.prototype, "muted", {
+    configurable: true,
+    enumerable: mutedProperty.enumerable,
+    get() {
+      return mutedProperty.get.call(this);
+    },
+    set(value) {
+      mutedProperty.set.call(this, value);
+      if (!value && !this.paused && !gesture) this.pause();
+    },
+  });
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function playWithPhoneRule() {
+    if (!this.muted && !gesture) {
+      return Promise.reject(
+        new DOMException("play() with sound needs a user gesture", "NotAllowedError"),
+      );
+    }
+    return play.call(this);
+  };
+}
+
+/** Seconds into the episode on the active slide, or null without a player. */
+function activeVideoTime() {
+  const video = document.querySelector('[data-active="true"] video');
+  return video ? Math.round(video.currentTime * 100) / 100 : null;
+}
+
+/** A fresh phone profile, optionally with a saved resume point (the v1 format). */
+async function phoneContext(browser, snapshot) {
+  const context = await browser.newContext({
+    viewport: { width: 375, height: 812 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await context.addInitScript(installPlayingProbe);
+  if (snapshot) {
+    await context.addInitScript((saved) => {
+      window.localStorage.setItem("project-flow.resume.v1", JSON.stringify(saved));
+    }, snapshot);
+  }
+  return context;
 }
 
 function fileBytes(relativePath) {
@@ -322,6 +398,27 @@ try {
     `swipe took ${swipe?.ms} ms (budget ${SWIPE_BUDGET_MS} ms)`,
   );
 
+  // A scroll gesture (not a key) still moves to the next episode once it
+  // settles: the index is committed at scrollend, not mid-gesture (PB-6).
+  if (!SCALE) {
+    await feed.mouse.move(187, 400);
+    await feed.mouse.wheel(0, 812);
+    const scrolled = await feed
+      .waitForFunction(
+        () =>
+          document.querySelector('[data-active="true"]')?.getAttribute("data-content-id") ===
+          "item_signal_3",
+        null,
+        { timeout: 5_000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    measured.scrollGestureMovedTo = await feed.evaluate(
+      () => document.querySelector('[data-active="true"]')?.getAttribute("data-content-id") ?? null,
+    );
+    check(scrolled, `a scroll gesture did not move to item_signal_3 (on ${measured.scrollGestureMovedTo})`);
+  }
+
   // Swipe deep into the feed: the list must extend, media stays bounded.
   if (SCALE) {
     for (let step = 0; step < 45; step += 1) {
@@ -436,7 +533,219 @@ try {
     .catch(() => false);
   measured.resume = { target: resumeTarget.contentId, playingWithOffer: resumedOk };
   check(resumedOk, `resume did not reopen ${resumeTarget.contentId} with its offer`);
+
+  // 9: Continue seeks to the saved position (5 s), right away.
+  if (resumedOk) {
+    const beforeContinue = await resumed.evaluate(activeVideoTime);
+    await resumed.click('[aria-label="Continue episode"]');
+    await sleep(800);
+    const afterContinue = await resumed.evaluate(activeVideoTime);
+    measured.resume.continueSeek = { beforeSeconds: beforeContinue, afterSeconds: afterContinue };
+    check(
+      afterContinue !== null && afterContinue >= 4.5,
+      `Continue did not seek to the saved 5 s: the episode was at ${beforeContinue} s, then ${afterContinue} s`,
+    );
+  }
   await resumeContext.close();
+
+  // 10: a viewer who once turned the sound on still gets autoplay, muted.
+  // Headless Chrome plays sound without a gesture whatever --autoplay-policy
+  // says (measured 2026-09-17), phones do not: this page gets the phone rule.
+  {
+    const mutedContext = await phoneContext(browser, {
+      contentId: "item_signal_1",
+      seriesId: "series_signal",
+      episodeId: "ep_signal_1",
+      positionMs: 500,
+      durationMs: 10_000,
+      muted: false,
+      captionsOn: false,
+      updatedAt: Date.now(),
+      completed: false,
+    });
+    await mutedContext.addInitScript(installPhoneAutoplayRule);
+    const page = await mutedContext.newPage();
+    trackPage(page, "unmuted preference", consoleErrors, []);
+    await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+    const played = await page
+      .waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 8_000 })
+      .then(() => true)
+      .catch(() => false);
+    // Long enough for the saved preference to have been applied.
+    await sleep(3_000);
+    const state = await page.evaluate(() => {
+      const video = document.querySelector('[data-active="true"] video');
+      return video
+        ? { muted: video.muted, paused: video.paused, seconds: video.currentTime }
+        : null;
+    });
+    measured.unmutedPreference = { played, state };
+    check(
+      played && state !== null && !state.paused && state.seconds >= 1,
+      `a stored unmuted preference left the first episode stopped (${JSON.stringify(state)})`,
+    );
+    check(state?.muted === true, `autoplay on return is not muted (${JSON.stringify(state)})`);
+    await mutedContext.close();
+  }
+
+  // 11: a returning viewer who finished an episode lands on the next one.
+  {
+    const [finished, expectedNext] = SCALE
+      ? [
+          { contentId: "item_stress_3_10", seriesId: "series_stress_3", episodeId: "ep_stress_3_10" },
+          "item_stress_3_11",
+        ]
+      : [
+          { contentId: "item_signal_2", seriesId: "series_signal", episodeId: "ep_signal_2" },
+          "item_signal_3",
+        ];
+    const returnContext = await phoneContext(browser, {
+      ...finished,
+      positionMs: 10_000,
+      durationMs: 10_000,
+      muted: true,
+      captionsOn: false,
+      updatedAt: Date.now(),
+      completed: true,
+    });
+    const page = await returnContext.newPage();
+    trackPage(page, "return after finishing", consoleErrors, []);
+    await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+    // Before the first episode could end: auto-continue must not be what gets there.
+    const landed = await page
+      .waitForFunction(
+        (id) =>
+          window.__flowPlaying.some((entry) => entry.contentId === id) &&
+          document.querySelector('[aria-label="Continue story"]') !== null,
+        expectedNext,
+        { timeout: 8_000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    const firstPlayed = await page.evaluate(() => window.__flowPlaying[0]?.contentId ?? null);
+    measured.returnAfterFinishing = { finished: finished.contentId, expectedNext, landed, firstPlayed };
+    check(
+      landed && firstPlayed === expectedNext,
+      `after finishing ${finished.contentId} the viewer landed on ${firstPlayed}, not ${expectedNext} with its offer`,
+    );
+    await returnContext.close();
+  }
+
+  if (!SCALE) {
+    // 12: offline while the next episode warms up, then back online.
+    const offlineContext = await phoneContext(browser, null);
+    const page = await offlineContext.newPage();
+    // Network failures are the point here: only script errors count.
+    page.on("pageerror", (error) => consoleErrors.push(`offline: ${error.message}`));
+    const failedWhileOffline = [];
+    page.on("requestfailed", (request) => {
+      const { pathname } = new URL(request.url());
+      if (pathname.includes("/hls/")) failedWhileOffline.push(pathname.replace(/^.*\/hls\//, ""));
+    });
+    await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 10_000 });
+    // The feed page is built (catalog fetched): episode 3 has a slide to warm in.
+    await page.waitForFunction(
+      () => (document.querySelector('[role="feed"]')?.children.length ?? 0) >= 4,
+      null,
+      { timeout: 10_000 },
+    );
+    await offlineContext.setOffline(true);
+    await page.evaluate(() =>
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" })),
+    );
+    // Episode 3 is now the next one and tries to warm up with no network.
+    await sleep(Number(process.env.FLOW_E2E_OFFLINE_MS ?? 12_000));
+    await offlineContext.setOffline(false);
+    await sleep(1_000);
+    const outcome = await page.evaluate(
+      () =>
+        new Promise((resolveOutcome) => {
+          const seen = window.__flowPlaying.length;
+          const start = performance.now();
+          let errorShown = false;
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+          const poll = () => {
+            const active = document.querySelector('[data-active="true"]');
+            if (active?.querySelector('[role="status"]')) errorShown = true;
+            const played = window.__flowPlaying.slice(seen).map((entry) => entry.contentId);
+            if (played.includes("item_signal_3")) {
+              resolveOutcome({ result: "played", ms: Math.round(performance.now() - start) });
+            } else if (errorShown && played.includes("item_signal_4")) {
+              resolveOutcome({ result: "error_then_skip", ms: Math.round(performance.now() - start) });
+            } else if (performance.now() - start > 15_000) {
+              const video = active?.querySelector("video");
+              resolveOutcome({
+                result: "stuck",
+                active: active?.getAttribute("data-content-id") ?? null,
+                seconds: video ? video.currentTime : null,
+                paused: video ? video.paused : null,
+                errorShown,
+              });
+            } else {
+              window.setTimeout(poll, 100);
+            }
+          };
+          poll();
+        }),
+    );
+    measured.offlineWhileWarming = { ...outcome, failedMediaRequests: failedWhileOffline };
+    check(
+      outcome.result === "played" || outcome.result === "error_then_skip",
+      `after going offline while episode 3 warmed and coming back, it never played: ${JSON.stringify(outcome)}`,
+    );
+    await offlineContext.close();
+
+    // 13: an episode whose media cannot load shows the error, then skips by itself.
+    const brokenContext = await phoneContext(browser, null);
+    const broken = await brokenContext.newPage();
+    broken.on("pageerror", (error) => consoleErrors.push(`broken episode: ${error.message}`));
+    await broken.route("**/hls/episode-3/**", (route) =>
+      route.fulfill({ status: 404, body: "not found" }),
+    );
+    await broken.goto(`${BASE}/watch/signal-night/episode-3`, { waitUntil: "domcontentloaded" });
+    const failure = await broken.evaluate(
+      () =>
+        new Promise((resolveFailure) => {
+          const start = performance.now();
+          let shownAt = null;
+          const poll = () => {
+            const active = document.querySelector('[data-active="true"]');
+            const status = active?.querySelector('[role="status"]');
+            if (status && shownAt === null) shownAt = performance.now();
+            const skipped = window.__flowPlaying.find((entry) => entry.contentId === "item_signal_4");
+            if (skipped) {
+              resolveFailure({
+                errorShownMs: shownAt === null ? null : Math.round(shownAt - start),
+                errorVisibleForMs: shownAt === null ? null : Math.round(skipped.at - shownAt),
+                skippedTo: skipped.contentId,
+              });
+            } else if (performance.now() - start > 20_000) {
+              resolveFailure({
+                errorShownMs: shownAt === null ? null : Math.round(shownAt - start),
+                skippedTo: null,
+                active: active?.getAttribute("data-content-id") ?? null,
+              });
+            } else {
+              window.setTimeout(poll, 50);
+            }
+          };
+          poll();
+        }),
+    );
+    measured.unplayableEpisode = failure;
+    check(
+      failure.errorShownMs !== null && failure.skippedTo === "item_signal_4",
+      `an episode that cannot load did not show its error and skip: ${JSON.stringify(failure)}`,
+    );
+    check(
+      failure.errorVisibleForMs === undefined ||
+        failure.errorVisibleForMs === null ||
+        failure.errorVisibleForMs >= 1_500,
+      `the playback error was visible only ${failure.errorVisibleForMs} ms before the skip`,
+    );
+    await brokenContext.close();
+  }
 
   // 6: unknown episode.
   const missing = await context.newPage();

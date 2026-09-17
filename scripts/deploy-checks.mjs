@@ -8,6 +8,7 @@
  * checks the files that were actually produced — a correct configuration is
  * not proof of a correct artifact.
  */
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +38,26 @@ function httpsOrigin(name) {
   return url;
 }
 
+/** Same rule as apps/web/next.config.ts: explicit version, else the commit. */
+function appVersion() {
+  const explicit = process.env.NEXT_PUBLIC_APP_VERSION?.trim();
+  if (explicit) return explicit;
+  const git = spawnSync("git", ["rev-parse", "--short=12", "HEAD"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  return git.status === 0 ? git.stdout.trim() : "";
+}
+
 function checkEnv() {
+  // Without a version, events cannot be tied to the code and catalog that
+  // produced them (MP-7).
+  const version = appVersion();
+  if (!version || version === "0.0.0") {
+    failures.push("no app version: set NEXT_PUBLIC_APP_VERSION or build from a git checkout");
+  } else {
+    console.error(`deploy-checks: app version ${version}`);
+  }
   if (process.env.FLOW_STRESS_EPISODES?.trim()) {
     failures.push(
       "FLOW_STRESS_EPISODES is set: that is a scale-test catalog, never a publishable one",

@@ -30,6 +30,45 @@ export function buildShareUrl(
   return url.toString();
 }
 
+/**
+ * How long a playback error stays on screen before the feed moves on (PB-5):
+ * long enough to read one sentence, short enough not to feel stuck.
+ */
+export const ERROR_SKIP_DELAY_MS = 2_500;
+
+/**
+ * Slide the scroller rests on once scrolling settled (PB-6), or null for an
+ * empty feed. Read only when the gesture is over, never mid-swipe.
+ */
+export function settledIndex(scrollTop: number, slideHeight: number, count: number): number | null {
+  if (count <= 0) return null;
+  const height = slideHeight > 0 ? slideHeight : 1;
+  const raw = Math.round(scrollTop / height);
+  return Math.min(count - 1, Math.max(0, raw));
+}
+
+/** The scroller already rests on the target: scrolling to it would fight a gesture. */
+export function isAtSlide(scrollTop: number, slideTop: number): boolean {
+  return Math.abs(scrollTop - slideTop) <= 1;
+}
+
+export type FirstPlayStartMode = "autoplay" | "play_gate" | "resume";
+
+/**
+ * Separates the first plays the product started from those a tap started
+ * (MP-2): the time-to-first-play target is judged on `autoplay` only, since a
+ * gate tap includes the viewer's reaction time.
+ */
+export function firstPlayStartMode(input: {
+  gateTapped: boolean;
+  resumeLandingId: string | null;
+  contentId: string;
+}): FirstPlayStartMode {
+  if (input.gateTapped) return "play_gate";
+  if (input.resumeLandingId !== null && input.resumeLandingId === input.contentId) return "resume";
+  return "autoplay";
+}
+
 /** Whether the PlayGate should show (autoplay blocked and not yet user-started). */
 export function shouldShowPlayGate(
   autoplayBlocked: boolean,

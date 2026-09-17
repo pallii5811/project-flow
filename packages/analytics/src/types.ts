@@ -40,6 +40,14 @@ export type AnalyticsEventName =
   | "episode_transition_completed"
   | "series_completed"
   | "series_end_reached"
+  /** The episode ended and its successor is missing, not ready or not published. */
+  | "series_unavailable_next"
+  /** Autoplay with sound refused: the episode plays muted instead. */
+  | "autoplay_muted_fallback"
+  /** A failed episode skipped automatically after its error was shown. */
+  | "playback_error_skip"
+  /** The viewer tapped Try again on a failed episode. */
+  | "playback_retry"
   | "recommendation_requested"
   | "recommendation_generated"
   | "recommendation_impression"
