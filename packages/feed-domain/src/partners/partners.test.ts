@@ -5,6 +5,7 @@ import { buildProducerStatement, type ProducerStatementInput } from "./producerS
 import {
   computeWatchedMinutes,
   watchProgressRecordsFromEnvelopes,
+  watchedMsBySeriesFor,
   type WatchProgressRecord,
 } from "./watchedMinutes";
 
@@ -106,10 +107,55 @@ describe("computeWatchedMinutes", () => {
       ...continuousPlay({ sessionId: "session_b", market: "BR" }),
     ]);
     expect(result.rows).toEqual([
-      { seriesId: "series_a", market: "BR", watchedMs: 59_750 },
-      { seriesId: "series_a", market: "IT", watchedMs: 59_750 },
+      { seriesId: "series_a", market: "BR", period: "2026-10", watchedMs: 59_750 },
+      { seriesId: "series_a", market: "IT", period: "2026-10", watchedMs: 59_750 },
     ]);
     expect(result.totalWatchedMs).toBe(119_500);
+  });
+
+  it("keeps months apart: a statement is one month, in UTC", () => {
+    const toNovember = Date.parse("2026-11-01T00:30:00.000Z") - T0;
+    const result = computeWatchedMinutes([
+      ...continuousPlay(),
+      ...continuousPlay().map((record) => ({
+        ...record,
+        eventId: `${record.eventId}_nov`,
+        sessionId: "session_nov",
+        timestampMs: record.timestampMs + toNovember,
+      })),
+    ]);
+    expect(result.rows.map((row) => row.period)).toEqual(["2026-10", "2026-11"]);
+  });
+});
+
+describe("watchedMsBySeriesFor", () => {
+  it("a single-market statement never sees another market's minutes", () => {
+    const result = computeWatchedMinutes([
+      ...continuousPlay(),
+      ...continuousPlay({ sessionId: "session_b", market: "BR" }),
+    ]);
+    const italy = watchedMsBySeriesFor(result, { market: "IT", period: "2026-10" });
+    expect(italy.watchedMsBySeries).toEqual({ series_a: 59_750 });
+    expect(italy.unattributedMs).toBe(0);
+    // The all-market total is exactly the trap this function exists to avoid.
+    expect(result.watchedMsBySeries).toEqual({ series_a: 119_500 });
+  });
+
+  it("another month is not this month's revenue", () => {
+    const result = computeWatchedMinutes(continuousPlay());
+    expect(
+      watchedMsBySeriesFor(result, { market: "IT", period: "2026-09" }).watchedMsBySeries,
+    ).toEqual({});
+  });
+
+  it("minutes without a country are held apart, not given to this market", () => {
+    const result = computeWatchedMinutes([
+      ...continuousPlay(),
+      ...continuousPlay({ sessionId: "session_c", market: null }),
+    ]);
+    const italy = watchedMsBySeriesFor(result, { market: "IT", period: "2026-10" });
+    expect(italy.watchedMsBySeries).toEqual({ series_a: 59_750 });
+    expect(italy.unattributedMs).toBe(59_750);
   });
 });
 
@@ -290,5 +336,16 @@ describe("buildProducerStatement", () => {
     expect(statement.totalWatchedMs).toBeNull();
     expect(statement.producerPoolCents).toBeNull();
     expect(statement.revenueCents).toBe(40_000);
+  });
+
+  it("declares the minutes whose market the collector never saw", () => {
+    const statement = buildProducerStatement({ ...base, unattributedWatchedMs: 12_000 });
+    expect(statement.issues).toContainEqual({
+      kind: "watch_time_without_market",
+      watchedMs: 12_000,
+    });
+    // They are declared, never paid from this market's pool.
+    expect(statement.totalWatchedMs).toBe(240_000);
+    expect(statement.producerPoolCents).toBe(20_000);
   });
 });

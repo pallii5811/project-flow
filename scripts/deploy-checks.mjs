@@ -94,6 +94,48 @@ function metaContent(html, key) {
   return [...html.matchAll(pattern)].map((match) => match[1]);
 }
 
+/**
+ * Every asset the catalog promises must be a file in the export (CP-1, CP-3).
+ * A caption marked "ready" whose file was never copied shows no text, and the
+ * catalog would still say it is there.
+ */
+function checkCatalogAssets(feedCatalog) {
+  let checked = 0;
+  const missing = [];
+  const seen = new Set();
+  const require = (item, kind, url) => {
+    if (typeof url !== "string" || url.length === 0) {
+      missing.push(`${item.id}: ${kind} has no URL`);
+      return;
+    }
+    // The stress catalog distinguishes posters with a query string.
+    const path = url.split("?")[0];
+    if (!path.startsWith("/")) {
+      missing.push(`${item.id}: ${kind} is not a site path: "${url}"`);
+      return;
+    }
+    if (seen.has(path)) return;
+    seen.add(path);
+    checked += 1;
+    try {
+      statSync(join(exportDir, path.slice(1)));
+    } catch {
+      missing.push(`${item.id}: ${kind} ${path} is not in the export`);
+    }
+  };
+  for (const item of feedCatalog.items) {
+    const playback = item.playback ?? {};
+    require(item, "video", playback.reference);
+    require(item, "poster", playback.posterReference);
+    require(item, "share card", playback.shareCardReference);
+    for (const track of item.captions ?? []) {
+      if (track.status === "ready") require(item, `captions [${track.language}]`, track.url);
+    }
+  }
+  for (const failure of missing) failures.push(failure);
+  console.error(`deploy-checks: ${checked} catalog assets resolved in the export`);
+}
+
 function checkExport() {
   const site = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") ?? "";
   if (!site) failures.push("NEXT_PUBLIC_SITE_URL is not set: cannot verify preview URLs");
@@ -130,8 +172,22 @@ function checkExport() {
         }
       }
     }
-    if (watchPages.includes(file) && metaContent(html, "og:image").length === 0) {
-      failures.push(`${name} has no og:image: shared links would show no picture`);
+    if (watchPages.includes(file)) {
+      if (metaContent(html, "og:image").length === 0) {
+        failures.push(`${name} has no og:image: shared links would show no picture`);
+      }
+      // VIR-4: a wide card is cropped to about 1.91:1 by the crawlers. A
+      // preview that does not declare a landscape size is a portrait poster
+      // about to be cut to a thin band.
+      const width = Number(metaContent(html, "og:image:width")[0]);
+      const height = Number(metaContent(html, "og:image:height")[0]);
+      if (!Number.isFinite(width) || !Number.isFinite(height)) {
+        failures.push(`${name} does not declare og:image:width/height`);
+      } else if (width <= height) {
+        failures.push(
+          `${name} preview is ${width}x${height}: a portrait card is cropped to a band on X and Facebook`,
+        );
+      }
     }
   }
 
@@ -148,6 +204,8 @@ function checkExport() {
       failures.push("catalog/feed.json lists no episodes");
     } else if (feedCatalog.items.some((item) => String(item.id).startsWith("item_stress_"))) {
       failures.push("catalog/feed.json contains the stress catalog");
+    } else {
+      checkCatalogAssets(feedCatalog);
     }
   }
 

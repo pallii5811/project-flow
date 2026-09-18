@@ -1,18 +1,32 @@
 /**
- * Packages one episode master into adaptive HLS for zero-egress hosting.
+ * Packages one episode master into adaptive HLS for zero-egress hosting, and
+ * refuses it when it would reach a viewer as a defect.
  *
- *   node scripts/package-episode.mjs <master.mp4> <output-dir> [--allow-below-1080p]
+ *   node scripts/package-episode.mjs <master.mp4> <output-dir> [options]
+ *
+ *   --allow-below-1080p      stand-in packs only (docs/content-operations.md)
+ *   --audio-stream <n>       which audio stream carries the dialogue
+ *   --duration-min-ms <n>    episode length range this series declares
+ *   --duration-max-ms <n>
+ *   --no-poster              the caller derives its own poster from the master
+ *   --label <text>           how the episode is named in the refusal report
  *
  * Output:
  *   master.m3u8             adaptive playlist (what the catalog points to)
  *   v0/ v1/ …               one rendition per rung: index.m3u8, init.mp4, seg_NNN.m4s
- *   poster.jpg              720 px wide still at 1 s
- *   manifest.json           MEASURED facts: duration, rungs, bytes, real bitrates
+ *   poster.jpg              720 px wide still at 1 s (unless --no-poster)
+ *   manifest.json           MEASURED facts: duration, rungs, bytes, real
+ *                           bitrates, loudness before and after
  *
- * Rules (docs/standard.md, docs/business-model.md):
+ * Rules (docs/standard.md, docs/business-model.md, docs/content-operations.md):
  *   - vertical only: aspect between 0.45 and 0.65, as the catalog validator;
  *   - a producer master must be at least 1080×1920 (curation gate), unless
  *     --allow-below-1080p is passed for stand-in packs;
+ *   - exactly one audio stream, or --audio-stream: the second stream of a
+ *     delivery is usually music and effects, and shipping it loses the words;
+ *   - audio normalised to −16 LUFS / −1.5 dBTP (EBU R128, two-pass loudnorm),
+ *     and the result MEASURED on the packaged audio, not assumed;
+ *   - no black or silent opening, no frozen picture: the hook is the product;
  *   - rungs never upscale the master;
  *   - 2-second segments with a keyframe exactly every 2 seconds, so any rung
  *     can switch at any segment and a swipe needs only a few seconds of data;
@@ -31,10 +45,23 @@ import {
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
+import {
+  QUALITY_RULES,
+  checkMasterShape,
+  checkPicture,
+  checkPublishedLoudness,
+  checkSilence,
+  chooseAudioStream,
+  formatIssues,
+  parseDetections,
+  parseEbur128Summary,
+  parseLoudnormJson,
+} from "./lib/media-gate.mjs";
+
 const SEGMENT_SECONDS = 2;
 const MAX_MB_PER_MINUTE_LOWEST = 5;
-const ASPECT_MIN = 0.45;
-const ASPECT_MAX = 0.65;
+/** Bumped when a rule changes, so ingest re-runs episodes packaged under the old one. */
+const GATE_VERSION = 2;
 
 /** Vertical ladder: height, video cap, audio bitrate. */
 const LADDER = [
@@ -46,6 +73,13 @@ const LADDER = [
 
 function fail(message) {
   console.error(`package-episode: ${message}`);
+  process.exit(1);
+}
+
+/** The gate refused the episode: one block, the episode named, every reason. */
+function refuse(label, issues) {
+  console.error(`package-episode: REFUSED ${label}`);
+  console.error(formatIssues(label, issues));
   process.exit(1);
 }
 
@@ -64,6 +98,19 @@ function run(command, args, cwd = process.cwd()) {
   return result.stdout;
 }
 
+/** ffmpeg writes its measurements to stderr; a non-zero exit is still a failure. */
+function runCapturingStderr(command, args) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.error) fail(`${command} could not start: ${result.error.message}`);
+  if (result.status !== 0) {
+    fail(`${command} exited with ${result.status}\n${(result.stderr ?? "").slice(-2000)}`);
+  }
+  return `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+}
+
 function directoryBytes(dir) {
   return readdirSync(dir).reduce((sum, name) => {
     const path = join(dir, name);
@@ -72,52 +119,138 @@ function directoryBytes(dir) {
   }, 0);
 }
 
+function flagValue(list, name) {
+  const at = list.indexOf(name);
+  if (at === -1) return null;
+  const raw = list[at + 1];
+  if (raw === undefined) fail(`${name} needs a value`);
+  return raw;
+}
+
+function numberFlag(list, name) {
+  const raw = flagValue(list, name);
+  if (raw === null) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) fail(`${name} must be a number, got "${raw}"`);
+  return value;
+}
+
 const args = process.argv.slice(2);
 const allowBelow1080p = args.includes("--allow-below-1080p");
-const [inputArg, outputArg] = args.filter((arg) => !arg.startsWith("--"));
+const writePoster = !args.includes("--no-poster");
+const audioStreamFlag = numberFlag(args, "--audio-stream");
+const durationMinMs = numberFlag(args, "--duration-min-ms");
+const durationMaxMs = numberFlag(args, "--duration-max-ms");
+const labelFlag = flagValue(args, "--label");
+
+const FLAGS_WITH_VALUES = new Set([
+  "--audio-stream",
+  "--duration-min-ms",
+  "--duration-max-ms",
+  "--label",
+]);
+const positional = [];
+for (let i = 0; i < args.length; i += 1) {
+  const arg = args[i];
+  if (arg.startsWith("--")) {
+    if (FLAGS_WITH_VALUES.has(arg)) i += 1;
+    continue;
+  }
+  positional.push(arg);
+}
+const [inputArg, outputArg] = positional;
 if (!inputArg || !outputArg) {
   fail(
-    "usage: node scripts/package-episode.mjs <master> <output-dir> [--allow-below-1080p]",
+    "usage: node scripts/package-episode.mjs <master> <output-dir> [--allow-below-1080p] [--audio-stream n] [--duration-min-ms n] [--duration-max-ms n] [--no-poster] [--label text]",
   );
 }
 const input = resolve(inputArg);
 const output = resolve(outputArg);
+const label = labelFlag ?? basename(input);
 
 const probe = JSON.parse(
   run("ffprobe", [
     "-v",
     "error",
     "-show_entries",
-    "stream=codec_type,width,height,r_frame_rate:format=duration",
+    "stream=index,codec_type,codec_name,channels,width,height,r_frame_rate:stream_tags=language:format=duration",
     "-of",
     "json",
     input,
   ]),
 );
 const video = probe.streams.find((stream) => stream.codec_type === "video");
-const hasAudio = probe.streams.some((stream) => stream.codec_type === "audio");
 const durationSeconds = Number(probe.format?.duration);
-if (!video) fail("the master has no video stream");
-if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-  fail(`unreadable duration: ${probe.format?.duration}`);
+if (!video) {
+  refuse(label, [{ code: "no_video", message: "the master has no video stream" }]);
 }
 
 const { width, height } = video;
-const aspect = width / height;
-if (!(aspect >= ASPECT_MIN && aspect <= ASPECT_MAX)) {
-  fail(`not vertical: ${width}×${height} (aspect ${aspect.toFixed(3)})`);
-}
-if (height < 1920 && !allowBelow1080p) {
-  fail(`master is ${width}×${height}; the curation gate requires at least 1080×1920`);
-}
-
 const [fpsNum, fpsDen] = String(video.r_frame_rate).split("/").map(Number);
 const fps = fpsDen ? fpsNum / fpsDen : fpsNum;
-if (!Number.isFinite(fps) || fps <= 0)
-  fail(`unreadable frame rate: ${video.r_frame_rate}`);
+const durationMs = Number.isFinite(durationSeconds)
+  ? Math.round(durationSeconds * 1000)
+  : NaN;
+
+const shapeIssues = checkMasterShape(
+  { width, height, fps, durationMs },
+  {
+    allowBelow1080p,
+    durationMinMs: durationMinMs ?? undefined,
+    durationMaxMs: durationMaxMs ?? undefined,
+  },
+);
+const audioChoice = chooseAudioStream(probe.streams, audioStreamFlag);
+const preIssues = [...shapeIssues, ...audioChoice.issues];
+if (preIssues.length > 0) refuse(label, preIssues);
+
+const audioIndex = audioChoice.index;
+
+/**
+ * One pass over the master measures everything the gate needs: black picture,
+ * frozen picture, silence, and the loudness the second pass will correct.
+ */
+const firstPass = runCapturingStderr("ffmpeg", [
+  "-hide_banner",
+  "-nostats",
+  "-i",
+  input,
+  "-map",
+  "0:v:0",
+  "-map",
+  `0:a:${audioIndex}`,
+  "-vf",
+  `blackdetect=d=0.3:pix_th=0.10,freezedetect=n=-60dB:d=${QUALITY_RULES.freezeMaxSeconds}`,
+  "-af",
+  `silencedetect=n=-50dB:d=1,loudnorm=I=${QUALITY_RULES.targetLufs}:TP=-1.5:LRA=11:print_format=json`,
+  "-f",
+  "null",
+  "-",
+]);
+
+const detections = parseDetections(firstPass);
+const measuredInput = parseLoudnormJson(firstPass);
+const mediaIssues = [
+  ...checkPicture(detections, durationMs),
+  ...checkSilence(detections, durationMs),
+];
+if (!measuredInput) {
+  mediaIssues.push({
+    code: "loudness_unmeasured",
+    message: "ffmpeg did not report the loudness of the master: it cannot be normalised",
+  });
+}
+if (mediaIssues.length > 0) refuse(label, mediaIssues);
 
 const rungs = LADDER.filter((rung) => rung.height <= height);
-if (rungs.length === 0) fail(`master height ${height} is below the lowest rung`);
+if (rungs.length === 0) {
+  refuse(label, [
+    {
+      code: "below_lowest_rung",
+      message: `master height ${height} is below the lowest rung`,
+    },
+  ]);
+}
 
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
@@ -127,6 +260,14 @@ const split = `[0:v]split=${rungs.length}${rungs.map((_, i) => `[s${i}]`).join("
 const scales = rungs.map(
   (rung, i) => `[s${i}]scale=w=-2:h=${rung.height}:flags=lanczos,setsar=1[o${i}]`,
 );
+/** Second loudnorm pass: the measurements of the first one, applied once, then split. */
+const loudnorm =
+  `[0:a:${audioIndex}]loudnorm=I=${QUALITY_RULES.targetLufs}:TP=-1.5:LRA=11:` +
+  `measured_I=${measuredInput.inputI}:measured_TP=${measuredInput.inputTp}:` +
+  `measured_LRA=${measuredInput.inputLra}:measured_thresh=${measuredInput.inputThresh}:` +
+  `offset=${measuredInput.targetOffset}:linear=true,aresample=48000,` +
+  `asplit=${rungs.length}${rungs.map((_, i) => `[a${i}]`).join("")}`;
+
 const ffmpegArgs = [
   "-hide_banner",
   "-loglevel",
@@ -135,11 +276,10 @@ const ffmpegArgs = [
   "-i",
   input,
   "-filter_complex",
-  [split, ...scales].join(";"),
+  [split, ...scales, loudnorm].join(";"),
 ];
 rungs.forEach((rung, i) => {
-  ffmpegArgs.push("-map", `[o${i}]`);
-  if (hasAudio) ffmpegArgs.push("-map", "0:a:0");
+  ffmpegArgs.push("-map", `[o${i}]`, "-map", `[a${i}]`);
   ffmpegArgs.push(
     `-crf:v:${i}`,
     "23",
@@ -147,8 +287,9 @@ rungs.forEach((rung, i) => {
     `${rung.maxrateKbps}k`,
     `-bufsize:v:${i}`,
     `${rung.maxrateKbps * 2}k`,
+    `-b:a:${i}`,
+    `${rung.audioKbps}k`,
   );
-  if (hasAudio) ffmpegArgs.push(`-b:a:${i}`, `${rung.audioKbps}k`);
 });
 ffmpegArgs.push(
   "-c:v",
@@ -163,8 +304,11 @@ ffmpegArgs.push(
   `expr:gte(t,n_forced*${SEGMENT_SECONDS})`,
   "-sc_threshold",
   "0",
+  "-c:a",
+  "aac",
+  "-ac",
+  "2",
 );
-if (hasAudio) ffmpegArgs.push("-c:a", "aac", "-ac", "2");
 ffmpegArgs.push(
   "-f",
   "hls",
@@ -185,28 +329,30 @@ ffmpegArgs.push(
   "-master_pl_name",
   "master.m3u8",
   "-var_stream_map",
-  rungs.map((_, i) => (hasAudio ? `v:${i},a:${i}` : `v:${i}`)).join(" "),
+  rungs.map((_, i) => `v:${i},a:${i}`).join(" "),
   "v%v/index.m3u8",
 );
 run("ffmpeg", ffmpegArgs, output);
 
-run("ffmpeg", [
-  "-hide_banner",
-  "-loglevel",
-  "error",
-  "-y",
-  "-ss",
-  String(Math.min(1, durationSeconds / 2)),
-  "-i",
-  input,
-  "-frames:v",
-  "1",
-  "-vf",
-  "scale=720:-2",
-  "-q:v",
-  "3",
-  join(output, "poster.jpg"),
-]);
+if (writePoster) {
+  run("ffmpeg", [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-ss",
+    String(Math.min(1, durationSeconds / 2)),
+    "-i",
+    input,
+    "-frames:v",
+    "1",
+    "-vf",
+    "scale=720:-2",
+    "-q:v",
+    "3",
+    join(output, "poster.jpg"),
+  ]);
+}
 
 /** Every URI a playlist names must exist on disk — checked, not assumed. */
 function checkPlaylist(dir, name) {
@@ -237,7 +383,7 @@ const measured = rungs.map((rung, i) => {
     name: `v${i}`,
     height: rung.height,
     maxrateKbps: rung.maxrateKbps,
-    audioKbps: hasAudio ? rung.audioKbps : null,
+    audioKbps: rung.audioKbps,
     segments,
     bytes,
     averageKbps: Math.round((bytes * 8) / durationSeconds / 1000),
@@ -245,34 +391,74 @@ const measured = rungs.map((rung, i) => {
 });
 if (!readdirSync(output).includes("master.m3u8")) fail("master.m3u8 was not written");
 
+/**
+ * The loudness of what will actually be served, read back from the packaged
+ * rendition. A filter that was asked to normalise is not proof that it did.
+ */
+const publishedLoudness = parseEbur128Summary(
+  runCapturingStderr("ffmpeg", [
+    "-hide_banner",
+    "-nostats",
+    "-loglevel",
+    "info",
+    "-i",
+    join(output, "v0", "index.m3u8"),
+    "-af",
+    "ebur128=peak=true",
+    "-f",
+    "null",
+    "-",
+  ]),
+);
+const loudnessIssues = checkPublishedLoudness(publishedLoudness);
+if (loudnessIssues.length > 0) refuse(label, loudnessIssues);
+
 const lowest = measured[0];
 const mbPerMinuteLowest = Number(
   (((lowest.bytes / durationSeconds) * 60) / 1_000_000).toFixed(2),
 );
 if (mbPerMinuteLowest > MAX_MB_PER_MINUTE_LOWEST) {
-  fail(
-    `lowest rung costs ${mbPerMinuteLowest} MB per minute (max ${MAX_MB_PER_MINUTE_LOWEST})`,
-  );
+  refuse(label, [
+    {
+      code: "too_many_bytes",
+      message: `lowest rung costs ${mbPerMinuteLowest} MB per minute (max ${MAX_MB_PER_MINUTE_LOWEST})`,
+    },
+  ]);
 }
 
 const manifest = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  gateVersion: GATE_VERSION,
   source: basename(input),
   sourceSha256: createHash("sha256").update(readFileSync(input)).digest("hex"),
-  durationMs: Math.round(durationSeconds * 1000),
+  durationMs,
   width,
   height,
   fps: Number(fps.toFixed(3)),
-  hasAudio,
+  hasAudio: true,
+  audioStream: audioIndex,
   segmentSeconds: SEGMENT_SECONDS,
   renditions: measured,
   mbPerMinuteLowest,
+  loudness: {
+    targetLufs: QUALITY_RULES.targetLufs,
+    deliveredLufs: measuredInput.inputI,
+    deliveredTruePeakDb: measuredInput.inputTp,
+    publishedLufs: publishedLoudness.integratedLufs,
+    publishedTruePeakDb: publishedLoudness.truePeakDb,
+    publishedRangeLu: publishedLoudness.loudnessRangeLu,
+  },
+  picture: {
+    blackRanges: detections.black.length,
+    freezeRanges: detections.freeze.length,
+    silenceRanges: detections.silence.length,
+  },
   ffmpeg: run("ffmpeg", ["-version"]).split(/\r?\n/)[0],
 };
 writeFileSync(join(output, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.error(
-  `package-episode: ${basename(input)} → ${measured.length} rungs, ` +
-    `${manifest.durationMs} ms, lowest ${mbPerMinuteLowest} MB/min, ` +
-    `total ${Math.round(directoryBytes(output) / 1024)} kB`,
+  `package-episode: ${label} → ${measured.length} rungs, ${manifest.durationMs} ms, ` +
+    `${measuredInput.inputI} → ${publishedLoudness.integratedLufs} LUFS, ` +
+    `lowest ${mbPerMinuteLowest} MB/min, total ${Math.round(directoryBytes(output) / 1024)} kB`,
 );

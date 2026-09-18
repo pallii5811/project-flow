@@ -103,6 +103,19 @@ export type HlsLoadPlan = {
 
 /** Seconds of the next episode warmed while the current one plays. */
 export const NEXT_EPISODE_WARM_SECONDS = 4;
+/**
+ * The ceiling handed to hls.js, deliberately under two 2-second segments.
+ *
+ * With audio muxed into the renditions, the buffered range is the intersection
+ * of the video and audio ranges, and AAC encoder delay leaves it a few
+ * milliseconds short of 4.000 s. Asking for exactly 4 s therefore bought a
+ * THIRD segment — half again the bytes of the warm-up, for nothing a viewer
+ * would notice. Measured 2026-09-18 on the re-packaged stand-in pack, whose
+ * renditions carry audio for the first time: `npm run e2e:web` reported "next
+ * episode fetched past its first 4 s: v2/seg_2" with a 4 s ceiling, and stops
+ * at two segments with this one.
+ */
+export const NEXT_EPISODE_WARM_CEILING_SECONDS = 3.5;
 export const ACTIVE_BUFFER_SECONDS = 30;
 export const ACTIVE_MAX_BUFFER_SECONDS = 60;
 
@@ -124,8 +137,8 @@ export function planHlsLoad(
   }
   return {
     load: preload === "auto" ? "segments" : "manifest",
-    targetBufferSeconds: NEXT_EPISODE_WARM_SECONDS,
-    maxBufferSeconds: NEXT_EPISODE_WARM_SECONDS,
+    targetBufferSeconds: NEXT_EPISODE_WARM_CEILING_SECONDS,
+    maxBufferSeconds: NEXT_EPISODE_WARM_CEILING_SECONDS,
   };
 }
 

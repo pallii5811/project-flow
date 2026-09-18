@@ -128,7 +128,7 @@ A closed beta with zero ads comes before any public push.
 - outreach to catalog licensors with non-exclusive AVOD rights (Face Production Media, SeaStar Film);
 - outreach to independent producers without distribution.
 
-If proven titles require minimum guarantees, revenue share alone cannot meet the gate. That is an owner decision: uplift, funding partner or smaller launch. The gates are never lowered.
+If proven titles require minimum guarantees, we pass on the title. Rejected on 2026-09-18 because it would change the terms: no guarantees, no flat fees, no funding partner for guarantees — the public page promises "no fees, no minimums" on both sides, and there is no owner cash. What stays open is an uplift of the revenue share, or a smaller launch. The gates are never lowered.
 
 **Revisit:** When the first licensors answer with terms, and when beta data replaces the model's assumptions (completion 1 in 3, 9 series a month per engaged viewer).
 

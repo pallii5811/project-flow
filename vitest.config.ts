@@ -8,6 +8,9 @@ export default defineConfig({
       "packages/**/*.test.ts",
       "apps/mobile/src/**/*.test.ts",
       "apps/web/src/**/*.test.ts",
+      // The content pipeline lives in scripts/ as plain .mjs (no build step);
+      // its pure rules are tested from here.
+      "test/**/*.test.ts",
     ],
   },
   resolve: {

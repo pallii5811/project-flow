@@ -115,8 +115,32 @@ function check(condition, message) {
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 
-async function waitForServer() {
+/**
+ * A previous run's server can still hold the port for a moment. Spawning over
+ * it binds nothing: the new server exits, the old one answers the first
+ * request and then dies with its parent, and the run fails minutes later with
+ * a connection refused that says nothing about the cause. Seen twice on
+ * 2026-09-18, running e2e:web and e2e:web:scale back to back.
+ */
+async function waitForPortFree() {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      await fetch(`${BASE}/`);
+    } catch {
+      return;
+    }
+    await sleep(100);
+  }
+  throw new Error(`port ${PORT} is still answering: another server is holding it`);
+}
+
+async function waitForServer(child) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (child.exitCode !== null) {
+      throw new Error(
+        `static server exited with ${child.exitCode} instead of serving ${BASE}`,
+      );
+    }
     try {
       const response = await fetch(`${BASE}/`);
       if (response.ok) return;
@@ -450,6 +474,7 @@ async function measureThrottled(browser, runs = 3) {
   return { runs: results, medianFirstPlayingMs: sorted[Math.floor(sorted.length / 2)] };
 }
 
+await waitForPortFree();
 const server = spawn(
   process.execPath,
   ["scripts/serve-static.mjs", EXPORT_DIR, String(PORT)],
@@ -461,7 +486,7 @@ const server = spawn(
 
 let browser;
 try {
-  await waitForServer();
+  await waitForServer(server);
   browser = await chromium.launch({ channel: "chrome", headless: true });
   const context = await browser.newContext({
     viewport: { width: 375, height: 812 },

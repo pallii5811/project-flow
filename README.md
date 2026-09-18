@@ -61,9 +61,15 @@ npm install
 | `npm run serve:web`  | Serve `apps/web/out` like Cloudflare Pages on http://localhost:3100                                    |
 | `npm run e2e:web`    | Real Chrome, phone profile: open → play → preload budget → swipe → deep link → 404 (run after a build) |
 
-## Packaging a series
+## Publishing a series
 
-`node scripts/package-episode.mjs <master> <output-dir>` turns a vertical master (at least 1080×1920) into adaptive HLS with 2-second segments, a poster and a `manifest.json` of measured facts. It refuses non-vertical or under-resolution masters, and any ladder whose lightest rung costs more than 5 MB per watched minute. Example: `content/series/signal-night/README.md`.
+`node scripts/ingest-series.mjs [slug]` turns a studio delivery (`content/series/<slug>/`: masters, subtitles and a `series.json` carrying the rights) into a publishable series: adaptive HLS, a WebP poster, a 1200×630 link card, verified WebVTT and the series manifest the catalog is built from. It is idempotent — an unchanged episode is not re-encoded — and it refuses the whole series when one episode would break the feed, keeping the version that worked.
+
+`node scripts/package-episode.mjs <master> <output-dir>` does one episode, with the same quality gate: vertical, at least 1080×1920, one dialogue audio track, loudness normalised to −16 LUFS and measured back on the packaged audio, no black, frozen or silent opening, and a lightest rung under 5 MB per watched minute.
+
+`node scripts/gate-proof.mjs` proves the gate by breaking it: six real deliveries, one per rule, refused for the reason they should be.
+
+What a studio must deliver, what each check means and what to do when one fails: [`docs/content-operations.md`](docs/content-operations.md). Example pack: `content/series/signal-night/README.md`.
 
 ## Deploy — Cloudflare Pages (free tier)
 
@@ -101,6 +107,7 @@ No secrets are required for Prompt A. Do not commit `.env`.
 - [`docs/business-model.md`](docs/business-model.md)
 - [`docs/standard.md`](docs/standard.md)
 - [`docs/content-strategy.md`](docs/content-strategy.md)
+- [`docs/content-operations.md`](docs/content-operations.md)
 - [`docs/vision.md`](docs/vision.md)
 - [`docs/product-principles.md`](docs/product-principles.md)
 - [`docs/ux-principles.md`](docs/ux-principles.md)

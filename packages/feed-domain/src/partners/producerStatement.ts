@@ -19,9 +19,20 @@ export type ProducerStatementInput = {
   revenueCents: number | null;
   /** Producer share in basis points: 5000 = 50%. */
   producerShareBps: number;
+  /**
+   * Minutes of THIS market and THIS month only, from `watchedMsBySeriesFor`.
+   * The all-market total would pay this market's pool for viewing that
+   * happened somewhere else, at ten times the RPM (CP-5).
+   */
   watchedMsBySeries: Readonly<Record<string, number>>;
   /** Producer of record per series. */
   producerBySeries: Readonly<Record<string, string>>;
+  /**
+   * Watch time of the same month whose country the collector did not see. It
+   * is added to no market; the statement declares it, so minutes that nobody
+   * can attribute are visible instead of quietly missing.
+   */
+  unattributedWatchedMs?: number;
 };
 
 export type ProducerStatementLine = {
@@ -38,7 +49,8 @@ export type ProducerStatementIssue =
   | { kind: "invalid_share" }
   | { kind: "invalid_watched_ms"; seriesId: string }
   | { kind: "series_without_producer"; seriesId: string }
-  | { kind: "revenue_without_watch_time" };
+  | { kind: "revenue_without_watch_time" }
+  | { kind: "watch_time_without_market"; watchedMs: number };
 
 export type ProducerStatement = {
   period: string;
@@ -154,6 +166,11 @@ export function buildProducerStatement(input: ProducerStatementInput): ProducerS
 
   if (producerPoolCents !== null && producerPoolCents > 0 && totalWatchedMs === 0) {
     issues.push({ kind: "revenue_without_watch_time" });
+  }
+
+  const unattributed = input.unattributedWatchedMs ?? 0;
+  if (Number.isFinite(unattributed) && unattributed > 0) {
+    issues.push({ kind: "watch_time_without_market", watchedMs: unattributed });
   }
 
   const allocation =
