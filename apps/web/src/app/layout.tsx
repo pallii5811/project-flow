@@ -1,7 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { darkColors } from "@project-flow/design-system";
 
+import { ServiceWorkerRegistration } from "@/features/platform/ServiceWorkerRegistration";
+import { ROOT_VIEWPORT, isPublicLaunch, rootMetadata } from "@/lib/siteMetadata";
 import { resolveSiteUrl } from "@/lib/siteUrl";
 
 import "./globals.css";
@@ -36,18 +38,12 @@ const fontBody = localFont({
   fallback: ["system-ui", "sans-serif"],
 });
 
-export const metadata: Metadata = {
-  metadataBase: new URL(resolveSiteUrl(process.env.NEXT_PUBLIC_SITE_URL)),
-  title: {
-    default: "PROJECT FLOW",
-    template: "%s · PROJECT FLOW",
-  },
-  description: "Short drama that starts the moment you open it.",
-  openGraph: {
-    type: "website",
-    siteName: "PROJECT FLOW",
-  },
-};
+export const metadata: Metadata = rootMetadata(
+  resolveSiteUrl(process.env.NEXT_PUBLIC_SITE_URL),
+  isPublicLaunch(process.env.FLOW_PUBLIC),
+);
+
+export const viewport: Viewport = ROOT_VIEWPORT;
 
 export default function RootLayout({
   children,
@@ -63,6 +59,7 @@ export default function RootLayout({
         }}
       >
         {children}
+        <ServiceWorkerRegistration />
       </body>
     </html>
   );

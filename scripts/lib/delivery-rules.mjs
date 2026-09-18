@@ -10,6 +10,7 @@
  *     judged it with is unchanged: the master, the rules, and the options the
  *     delivery set (which audio stream, which length range, which resolution).
  */
+import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import { isLicensedLanguage } from "./vtt.mjs";
@@ -182,4 +183,24 @@ export function isPackageCurrent(record, expected) {
     record.gateVersion === expected.gateVersion &&
     sameOptions(record.gateOptions, expected.gateOptions)
   );
+}
+
+/** A revision is 12 lowercase hex characters: a folder name, and part of a URL. */
+export const REVISION_PATTERN = /^[0-9a-f]{12}$/;
+
+/**
+ * The name of the folder an encode is published in (hls/episode-N/<revision>/),
+ * from the files themselves: every relative path and the hash of its bytes,
+ * in path order. The same encode always gets the same name, so an unchanged
+ * episode keeps its URL; any other byte gives another name, so a new cut can
+ * never be served under the URL of the old one. That is what lets the site
+ * cache every playlist and segment for a year (docs/decisions.md, batch 5).
+ *
+ * @param {[string, string][]} files [relative path, sha256 hex] pairs
+ */
+export function encodeRevision(files) {
+  const lines = [...files]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([path, hash]) => `${path} ${hash}`);
+  return createHash("sha256").update(lines.join("\n")).digest("hex").slice(0, 12);
 }

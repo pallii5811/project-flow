@@ -25,6 +25,7 @@
     "serve:web": "node scripts/serve-static.mjs apps/web/out 3100",
     "e2e:web": "node scripts/e2e-feed.mjs",
     "e2e:web:scale": "node scripts/e2e-feed.mjs --scale",
+    "e2e:web:platform": "node scripts/e2e-platform.mjs",
     "ingest": "node scripts/ingest-series.mjs",
     "proof:gate": "node scripts/gate-proof.mjs"
   },

@@ -19,14 +19,9 @@
   animation: enter 360ms var(--flow-ease-out, ease-out) both;
 }
 
+/* The mark and the name come from features/platform/BrandMark (brand.ts). */
 .brand {
-  margin: 0;
-  font-family: var(--font-display), sans-serif;
-  font-size: 13px;
-  line-height: 16px;
-  font-weight: 700;
-  letter-spacing: 0.22em;
-  color: rgba(247, 245, 242, 0.78);
+  align-self: flex-start;
 }
 
 .message {

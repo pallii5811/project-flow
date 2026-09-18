@@ -57,9 +57,14 @@ import {
   isDiagEnabled,
   loadAcquisitionContext,
 } from "@/lib/session";
+import { shareMessage } from "@/lib/siteMetadata";
+import { shareOrigin } from "@/lib/siteUrl";
 
 import { LaunchDiagPanel } from "@/features/diagnostics/LaunchDiagPanel";
 import { patchLaunchDiagnostics } from "@/features/diagnostics/launchDiagnostics";
+import { InstallOffer } from "@/features/platform/InstallOffer";
+import { displayMode } from "@/features/platform/installRules";
+import { useInstallOffer } from "@/features/platform/useInstallOffer";
 
 import { episodeAnnouncement, intentConfirmation, shouldAnnounceEpisode } from "./a11y";
 import { ContinueStrip, UpNextLabel } from "./ContinueStrip";
@@ -476,6 +481,15 @@ export function FeedApp({
       analytics.track("page_view", {
         session_id: sessionId,
         route: typeof window !== "undefined" ? window.location.pathname : "/",
+        // Browser tab or installed app: how many come back from the home
+        // screen is measured here, not guessed from install prompts.
+        display_mode:
+          typeof window !== "undefined"
+            ? displayMode(
+                (query) => window.matchMedia(query).matches,
+                (window.navigator as Navigator & { standalone?: boolean }).standalone === true,
+              )
+            : "browser",
       });
     }
     if (isDiagEnabled()) setDiagOpen(true);
@@ -955,6 +969,7 @@ export function FeedApp({
       episode_number: item.episodeNumber,
       episode_count: episodeCountOf(feedRef.current.catalog, item),
     });
+    install.episodeFinished();
     void persistResume({
       contentId: item.id,
       seriesId: item.seriesId,
@@ -1053,7 +1068,12 @@ export function FeedApp({
    */
   const handleShare = useCallback(
     async (item: ContentItem, source: "rail" | "series_end") => {
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      // Inlined at build: every share points at the site, whatever host served
+      // this page (VIR-8).
+      const origin = shareOrigin(
+        process.env.NEXT_PUBLIC_SITE_URL,
+        typeof window !== "undefined" ? window.location.origin : "",
+      );
       const shareId = createShareId();
       const target =
         source === "series_end" ? storyShareTarget(item, feedRef.current.ordered) : item;
@@ -1082,11 +1102,7 @@ export function FeedApp({
       });
       if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
         try {
-          await navigator.share({
-            title: target.seriesTitle,
-            text: target.hook.replace(/\n/g, " "),
-            url,
-          });
+          await navigator.share({ ...shareMessage(target), url });
           analytics.track("share_native", {
             content_id: target.id,
             share_id: shareId,
@@ -1187,6 +1203,9 @@ export function FeedApp({
     resumeOffer !== null ||
     playbackFailure !== null ||
     notice !== null;
+  // The one-time invitation to install (A11Y-04): after real engagement,
+  // never over anything else on screen (installRules.ts).
+  const install = useInstallOffer(analytics, cueBlocked);
   useEffect(() => {
     if (
       !shouldShowSoundCue({
@@ -1750,6 +1769,14 @@ export function FeedApp({
         ) : null}
 
         <NoticePill notice={notice} durationMs={notice ? NOTICE_MS[notice.kind] : 0} />
+
+        {install.offer && !cueBlocked ? (
+          <InstallOffer
+            platform={install.offer}
+            onAccept={install.accept}
+            onDismiss={install.dismiss}
+          />
+        ) : null}
 
         <IntentSheet
           open={intentOpen}

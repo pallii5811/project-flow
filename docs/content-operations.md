@@ -104,7 +104,8 @@ that changes nothing reports "unchanged, byte for byte" and touches no file.
 What it writes:
 
 ```
-apps/web/public/content/series/<slug>/hls/episode-N/   master.m3u8, v0…v3, manifest.json
+apps/web/public/content/series/<slug>/hls/episode-N/   manifest.json (packaging record)
+apps/web/public/content/series/<slug>/hls/episode-N/<revision>/   master.m3u8, v0…v3
 apps/web/public/content/series/<slug>/posters/         episode-N.webp   (feed poster)
 apps/web/public/content/series/<slug>/share/           episode-N.jpg    (1200×630 link card)
 apps/web/public/content/series/<slug>/captions/        episode-N.<lang>.vtt
@@ -113,8 +114,17 @@ packages/feed-domain/src/data/generated/<slug>.ts      the series manifest the a
 
 The published series folder is **fully generated**: a file placed there by hand is removed
 at the next accepted ingest. Each `hls/episode-N/manifest.json` is the packaging record
-ingest resumes from (master name and hash, ffmpeg build, gate options); `export:web` keeps
-it out of the export.
+ingest resumes from (master name and hash, ffmpeg build, gate options, revision);
+`export:web` keeps it out of the export.
+
+The renditions sit in a folder named by the hash of their own files (`<revision>`, 12 hex
+characters, `encodeRevision` in `scripts/lib/delivery-rules.mjs`). An unchanged encode keeps
+its name and its URL; a new cut gets a new folder, and the manifest points the catalog at
+it. That is what lets the site tell browsers to keep every playlist and segment for a year
+(`_headers`, docs/deploy.md): a URL under `hls/` never changes content. `npm run export:web`
+refuses HLS outside a revision folder, and `npm run proof:gate` proves a re-delivered cut
+gets a new URL. When video moves to `MEDIA_BASE_URL`, the same rule and the same one-year
+header go with it.
 
 The catalog (`packages/feed-domain/src/data/catalog.ts`) is built from those manifests. It
 contains no episode data any more, only the hostile fixtures the tests need. The browser

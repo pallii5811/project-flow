@@ -60,6 +60,15 @@ export type AnalyticsEventName =
   | "next_story_offered"
   /** The viewer tapped the story offered at the end of a series. */
   | "next_story_open"
+  /** The one-time invitation to install the app appeared (platform: prompt, ios). */
+  | "install_offer_shown"
+  /**
+   * How it ended: accepted or declined_in_browser (the browser's own dialog),
+   * dismissed, acknowledged (iOS hint read; never an install), ignored.
+   */
+  | "install_offer_answered"
+  /** The browser reported the app installed (appinstalled). Never sent on iOS, which does not say. */
+  | "app_installed"
   | "recommendation_requested"
   | "recommendation_generated"
   | "recommendation_impression"

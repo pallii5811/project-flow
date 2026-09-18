@@ -10,6 +10,7 @@ import {
 
 import { FeedDocument } from "@/features/feed/FeedDocument";
 import { getWebFeedCatalog } from "@/lib/feedCatalog";
+import { watchMetadata } from "@/lib/siteMetadata";
 
 type WatchParams = {
   seriesSlug: string;
@@ -19,10 +20,6 @@ type WatchParams = {
 type WatchPageProps = {
   params: Promise<WatchParams>;
 };
-
-/** The size scripts/ingest-series.mjs writes; declared so crawlers can lay it out. */
-const SHARE_CARD_WIDTH = 1200;
-const SHARE_CARD_HEIGHT = 630;
 
 /**
  * Static export: one HTML file per published episode, so a shared link is a
@@ -53,30 +50,18 @@ export async function generateMetadata({ params }: WatchPageProps): Promise<Meta
     return { title: "Not found", description: "This episode is unavailable." };
   }
   const copy = resolveDisplayCopy(item, "en");
-  const description = copy.hook.replace(/\n/g, " ");
-  const path = watchPath(resolved);
-  return {
-    title: item.seriesTitle,
-    description,
-    alternates: { canonical: path },
-    openGraph: {
-      title: item.seriesTitle,
-      description,
-      url: path,
-      // VIR-4: the preview is the only picture the recipient sees before
-      // tapping, and crawlers crop a wide card to about 1.91:1. The 9:16
-      // poster would be cut to a thin centre band, so the card is the
-      // landscape image ingest builds from the same frame.
-      images: [
-        {
-          url: item.playback.shareCardReference,
-          width: SHARE_CARD_WIDTH,
-          height: SHARE_CARD_HEIGHT,
-          alt: `${item.seriesTitle} — episode ${item.episodeNumber}`,
-        },
-      ],
+  // Each episode has its own title and preview line (VIR-5): links to
+  // episode 1 and episode 40 must not look the same in a chat.
+  return watchMetadata(
+    {
+      seriesTitle: item.seriesTitle,
+      episodeNumber: item.episodeNumber,
+      episodeTitle: copy.title,
+      hook: copy.hook,
+      shareCardUrl: item.playback.shareCardReference,
     },
-  };
+    watchPath(resolved),
+  );
 }
 
 export default async function WatchPage({ params }: WatchPageProps) {

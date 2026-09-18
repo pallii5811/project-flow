@@ -42,13 +42,13 @@ if (!existsSync(outDir)) {
   console.error("build-stress: next build produced no apps/web/out");
   process.exit(1);
 }
-// Same post-build step as `npm run build -w @project-flow/web`.
-const linked = spawnSync(
-  process.execPath,
-  [resolve(repoRoot, "scripts/link-hls-engine.mjs"), outDir],
-  { stdio: "inherit" },
-);
-if (linked.status !== 0) process.exit(linked.status ?? 1);
+// Same post-build steps as `npm run build -w @project-flow/web`.
+for (const step of ["scripts/link-hls-engine.mjs", "scripts/finish-export.mjs"]) {
+  const done = spawnSync(process.execPath, [resolve(repoRoot, step), outDir], {
+    stdio: "inherit",
+  });
+  if (done.status !== 0) process.exit(done.status ?? 1);
+}
 renameSync(outDir, stressDir);
 console.error(
   `build-stress: ${episodes} extra episodes built in ${Math.round(

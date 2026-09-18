@@ -11,8 +11,9 @@
  *
  * Output — nothing typed by hand:
  *
- *   apps/web/public/content/series/<slug>/hls/episode-N/    adaptive renditions
- *   apps/web/public/content/series/<slug>/posters/          feed poster (WebP)
+ *   apps/web/public/content/series/<slug>/hls/episode-N/<revision>/   adaptive renditions,
+ *                            in a folder named by the hash of their files (cacheable for a year)
+ *   apps/web/public/content/series/<slug>/posters/         feed poster (WebP)
  *   apps/web/public/content/series/<slug>/share/            1200×630 link card
  *   apps/web/public/content/series/<slug>/captions/         verified WebVTT
  *   packages/feed-domain/src/data/generated/<slug>.ts       the series manifest
@@ -63,12 +64,14 @@ import {
   checkEpisodeNumbers,
   checkEpisodeSlugs,
   checkRights,
+  encodeRevision,
   episodeSlugOf,
   gateOptionsFor,
   isInside,
   isPackageCurrent,
   isSlug,
   packageFlags,
+  REVISION_PATTERN,
 } from "./lib/delivery-rules.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -242,15 +245,61 @@ function sameTree(a, b) {
   return true;
 }
 
-/** The packaging record of an episode folder, or null when it is not a finished package. */
+/**
+ * The packaging record of an episode folder, or null when it is not a finished
+ * package. The record sits at the episode's root; the encode itself is in the
+ * revision folder it names, or at the root for a package written before
+ * revisions existed (placeInRevision moves it).
+ */
 function readRecord(dir) {
   const path = join(dir, "manifest.json");
-  if (!existsSync(path) || !existsSync(join(dir, "master.m3u8"))) return null;
+  if (!existsSync(path)) return null;
+  let record;
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    record = JSON.parse(readFileSync(path, "utf8"));
   } catch {
     return null;
   }
+  const revision =
+    typeof record?.revision === "string" && REVISION_PATTERN.test(record.revision)
+      ? record.revision
+      : "";
+  return existsSync(join(dir, revision, "master.m3u8")) ? record : null;
+}
+
+/**
+ * Moves an encode into the folder named by its own files
+ * (hls/episode-N/<revision>/, encodeRevision) and records the name. An
+ * unchanged encode keeps its name, so its URL; a new cut gets a new one, so
+ * no viewer can ever mix a cached segment of the old cut with the new
+ * playlist — which is what lets the site cache HLS for a year. Only the stage
+ * is touched: the record may be a hard link to the published one, so it is
+ * replaced, never written through.
+ */
+function placeInRevision(episodeDir, record) {
+  if (
+    typeof record.revision === "string" &&
+    REVISION_PATTERN.test(record.revision) &&
+    existsSync(join(episodeDir, record.revision, "master.m3u8"))
+  ) {
+    return record.revision;
+  }
+  const files = [...listFiles(episodeDir)].filter(([rel]) => rel !== "manifest.json");
+  const revision = encodeRevision(files.map(([rel, path]) => [rel, sha256(path)]));
+  for (const [rel, path] of files) {
+    const target = join(episodeDir, revision, rel);
+    mkdirSync(dirname(target), { recursive: true });
+    renameSync(path, target);
+  }
+  for (const name of readdirSync(episodeDir)) {
+    if (name !== revision && name !== "manifest.json") {
+      rmSync(join(episodeDir, name), { recursive: true, force: true });
+    }
+  }
+  const recordPath = join(episodeDir, "manifest.json");
+  rmSync(recordPath, { force: true });
+  writeFileSync(recordPath, `${JSON.stringify({ ...record, revision }, null, 2)}\n`);
+  return revision;
 }
 
 /** The delivery file, before anything is trusted about it — and before any path is built from it. */
@@ -496,6 +545,7 @@ function ingestSeries(slug) {
       packagedNow.push(label);
     }
     validStaged.add(episodeSlug);
+    const revision = placeInRevision(stagedEpisode, packaged);
 
     const durationMs = packaged.durationMs;
 
@@ -584,7 +634,7 @@ function ingestSeries(slug) {
       width: packaged.width,
       height: packaged.height,
       fps: packaged.fps,
-      playbackReference: `/content/series/${slug}/hls/${episodeSlug}/master.m3u8`,
+      playbackReference: `/content/series/${slug}/hls/${episodeSlug}/${revision}/master.m3u8`,
       posterReference: `/content/series/${slug}/posters/${posterName}`,
       shareCardReference: `/content/series/${slug}/share/${shareName}`,
       captions,

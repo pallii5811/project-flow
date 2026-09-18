@@ -1,0 +1,275 @@
+/*
+ * Pages outside the feed (404, offline) and the install invitation.
+ * Same stage as the feed: near-black, warm ink, one ivory accent.
+ */
+
+.brand {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-display), sans-serif;
+  font-size: 18px;
+  line-height: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: rgba(247, 245, 242, 0.9);
+}
+
+.brandGlyph {
+  width: 13px;
+  height: 22px;
+  flex: none;
+  color: var(--flow-accent, #e8dcc8);
+}
+
+/* ---------- offline page ---------- */
+
+.offlineRoot {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: calc(32px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
+    calc(32px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
+  background: radial-gradient(ellipse 80% 55% at 50% 38%, #141416 0%, #0b0b0c 70%);
+  color: #f4f3f1;
+}
+
+.offlineColumn {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  animation: offlineEnter 360ms var(--flow-ease-out, ease-out) both;
+}
+
+.offlineMessage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.offlineKicker {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body), sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--flow-accent, #e8dcc8);
+}
+
+.offlineDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.9;
+  animation: offlinePulse 1.8s ease-in-out infinite;
+}
+
+.offlineTitle {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(28px, 8vw, 34px);
+  line-height: 1.12;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: #faf8f4;
+  text-wrap: balance;
+}
+
+.offlineBody {
+  margin: 0;
+  max-width: 32ch;
+  font-family: var(--font-body), sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  color: rgba(247, 245, 242, 0.78);
+  text-wrap: pretty;
+}
+
+.offlineButton {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 22px 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--flow-accent, #e8dcc8);
+  color: #141210;
+  font-family: var(--font-body), sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform var(--flow-fast, 120ms) ease;
+}
+
+.offlineButton:active {
+  transform: scale(0.97);
+}
+
+.offlineButton:focus-visible {
+  outline: 2px solid var(--flow-accent, #e8dcc8);
+  outline-offset: 3px;
+}
+
+.offlineButtonGlyph {
+  width: 18px;
+  height: 18px;
+}
+
+@keyframes offlineEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes offlinePulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .offlineColumn,
+  .offlineDot {
+    animation: none;
+  }
+}
+
+/* ---------- install invitation ---------- */
+
+/*
+ * A card at the top of the frame, in the notices' slot, away from the story's
+ * title and the thumb. It never covers the rail and never takes focus.
+ */
+.install {
+  position: absolute;
+  z-index: 40;
+  top: calc(14px + env(safe-area-inset-top));
+  left: calc(12px + var(--flow-inset-left, 0px));
+  right: calc(12px + var(--flow-inset-right, 0px));
+  max-width: 400px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 12px 12px 12px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(20, 20, 22, 0.86);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.38);
+  color: #f4f3f1;
+  animation: installEnter 420ms var(--flow-ease-out, ease-out) both;
+}
+
+.installIcon {
+  grid-row: 1 / span 2;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.installTitle {
+  grid-column: 2;
+  margin: 0;
+  align-self: end;
+  font-family: var(--font-display), sans-serif;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #faf8f4;
+}
+
+.installBody {
+  grid-column: 2;
+  align-self: start;
+  margin: 0;
+  font-family: var(--font-body), sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  color: rgba(247, 245, 242, 0.76);
+}
+
+.installShare {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  /* No space after it: the comma sits against the glyph, as after a word. */
+  margin: 0 0 -2px 2px;
+  color: #faf8f4;
+}
+
+/*
+ * The answers sit in a row under the text, on both platforms: beside the text
+ * the iOS button left the title a column too narrow and broke it onto a
+ * second line, one word alone.
+ */
+.installActions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.installButton,
+.installQuiet {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  font-family: var(--font-body), sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--flow-fast, 120ms) ease;
+}
+
+.installButton {
+  background: var(--flow-accent, #e8dcc8);
+  color: #141210;
+}
+
+.installQuiet {
+  background: rgba(247, 245, 242, 0.1);
+  color: #f4f3f1;
+}
+
+.installButton:active,
+.installQuiet:active {
+  transform: scale(0.96);
+}
+
+.installButton:focus-visible,
+.installQuiet:focus-visible {
+  outline: 2px solid var(--flow-accent, #e8dcc8);
+  outline-offset: 2px;
+}
+
+@keyframes installEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .install {
+    animation: none;
+  }
+}

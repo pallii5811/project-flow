@@ -7,14 +7,29 @@
  * Routing, in order: exact file → path + ".html" → path + "/index.html" →
  * 404.html with status 404. Byte ranges are honored (Safari refuses to play
  * video without them).
+ *
+ * Headers: when the export has a `_headers` file (scripts/finish-export.mjs
+ * writes one), every response gets the headers Pages would send for its path,
+ * read by the same parser the export check uses (scripts/lib/pages-headers.mjs),
+ * on top of Pages' own default Cache-Control. Without the file, nothing is
+ * cached (an older export, served as before).
  */
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
+
+import { headersFor, parseHeadersFile } from "./lib/pages-headers.mjs";
 
 const [, , dirArg = "apps/web/out", portArg = "3100"] = process.argv;
 const root = resolve(dirArg);
 const port = Number(portArg);
+
+const headersPath = join(root, "_headers");
+const pagesRules = existsSync(headersPath)
+  ? parseHeadersFile(readFileSync(headersPath, "utf8")).rules
+  : null;
+/** What Pages sends on a static asset no rule overrides. */
+const PAGES_DEFAULT_CACHE = "public, max-age=0, must-revalidate";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -33,6 +48,8 @@ const MIME = {
   ".mp4": "video/mp4",
   ".m4s": "video/iso.segment",
   ".m3u8": "application/vnd.apple.mpegurl",
+  ".webmanifest": "application/manifest+json",
+  ".xml": "application/xml; charset=utf-8",
 };
 
 function fileAt(path) {
@@ -68,10 +85,13 @@ const server = createServer((request, response) => {
     }
   }
 
+  const pathname = decodeURIComponent((request.url ?? "/").split("?")[0] || "/");
   const headers = {
     "content-type": MIME[extname(file.path).toLowerCase()] ?? "application/octet-stream",
     "accept-ranges": "bytes",
-    "cache-control": "no-store",
+    ...(pagesRules
+      ? { "cache-control": PAGES_DEFAULT_CACHE, ...headersFor(pagesRules, pathname) }
+      : { "cache-control": "no-store" }),
   };
 
   const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range ?? "");

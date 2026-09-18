@@ -47,7 +47,7 @@ export const SIGNAL_NIGHT_MANIFEST: SeriesManifest = {
     "windowStart": "2026-01-01T00:00:00.000Z",
     "windowEnd": null
   },
-  "packagedAt": "2026-09-18T01:14:32.395Z",
+  "packagedAt": "2026-09-18T02:56:23.258Z",
   "gateVersion": 3,
   "episodes": [
     {
@@ -76,7 +76,7 @@ export const SIGNAL_NIGHT_MANIFEST: SeriesManifest = {
       "width": 720,
       "height": 1280,
       "fps": 25,
-      "playbackReference": "/content/series/signal-night/hls/episode-1/master.m3u8",
+      "playbackReference": "/content/series/signal-night/hls/episode-1/a3294ba53390/master.m3u8",
       "posterReference": "/content/series/signal-night/posters/episode-1.webp",
       "shareCardReference": "/content/series/signal-night/share/episode-1.jpg",
       "captions": [
@@ -136,7 +136,7 @@ export const SIGNAL_NIGHT_MANIFEST: SeriesManifest = {
       "width": 720,
       "height": 1280,
       "fps": 25,
-      "playbackReference": "/content/series/signal-night/hls/episode-2/master.m3u8",
+      "playbackReference": "/content/series/signal-night/hls/episode-2/a8558923fed9/master.m3u8",
       "posterReference": "/content/series/signal-night/posters/episode-2.webp",
       "shareCardReference": "/content/series/signal-night/share/episode-2.jpg",
       "captions": [
@@ -187,7 +187,7 @@ export const SIGNAL_NIGHT_MANIFEST: SeriesManifest = {
       "width": 720,
       "height": 1280,
       "fps": 25,
-      "playbackReference": "/content/series/signal-night/hls/episode-3/master.m3u8",
+      "playbackReference": "/content/series/signal-night/hls/episode-3/f63383d4a503/master.m3u8",
       "posterReference": "/content/series/signal-night/posters/episode-3.webp",
       "shareCardReference": "/content/series/signal-night/share/episode-3.jpg",
       "captions": [
@@ -238,7 +238,7 @@ export const SIGNAL_NIGHT_MANIFEST: SeriesManifest = {
       "width": 720,
       "height": 1280,
       "fps": 25,
-      "playbackReference": "/content/series/signal-night/hls/episode-4/master.m3u8",
+      "playbackReference": "/content/series/signal-night/hls/episode-4/6abacd58e4d9/master.m3u8",
       "posterReference": "/content/series/signal-night/posters/episode-4.webp",
       "shareCardReference": "/content/series/signal-night/share/episode-4.jpg",
       "captions": [
@@ -289,7 +289,7 @@ export const SIGNAL_NIGHT_MANIFEST: SeriesManifest = {
       "width": 720,
       "height": 1280,
       "fps": 25,
-      "playbackReference": "/content/series/signal-night/hls/episode-5/master.m3u8",
+      "playbackReference": "/content/series/signal-night/hls/episode-5/bb4503d81859/master.m3u8",
       "posterReference": "/content/series/signal-night/posters/episode-5.webp",
       "shareCardReference": "/content/series/signal-night/share/episode-5.jpg",
       "captions": [

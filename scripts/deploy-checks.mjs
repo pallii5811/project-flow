@@ -13,6 +13,9 @@ import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { pagesLimitProblems, platformProblems } from "./lib/platform-checks.mjs";
+import { isPublicLaunch } from "./lib/platform.mjs";
+
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const exportDir = resolve(repoRoot, "apps/web/out");
 const mode = process.argv[2];
@@ -238,8 +241,71 @@ function checkExport() {
     }
   }
 
+  checkPlatform(files, site);
+
   console.error(
     `deploy-checks: ${files.length} HTML files, ${watchPages.length} episode pages checked`,
+  );
+}
+
+/** The product's public name, read from its one constant (apps/web/src/lib/brand.ts). */
+function brandName() {
+  const source = readFileSync(resolve(repoRoot, "apps/web/src/lib/brand.ts"), "utf8");
+  return /export const BRAND_NAME = "([^"]+)";/.exec(source)?.[1] ?? null;
+}
+
+function allFiles(dir, prefix = "", out = new Map()) {
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    const rel = prefix ? `${prefix}/${name}` : name;
+    const stats = statSync(path);
+    if (stats.isDirectory()) allFiles(path, rel, out);
+    else out.set(rel, stats.size);
+  }
+  return out;
+}
+
+/**
+ * Headers, the launch switch, the service worker, the manifest and the brand
+ * (scripts/lib/platform-checks.mjs), and Cloudflare Pages' own limits.
+ */
+function checkPlatform(files, site) {
+  const brand = brandName();
+  if (!brand) {
+    failures.push("apps/web/src/lib/brand.ts declares no BRAND_NAME");
+    return;
+  }
+  const indexable = isPublicLaunch(process.env.FLOW_PUBLIC);
+  const sizes = allFiles(exportDir);
+  const read = (rel) => {
+    const path = join(exportDir, rel);
+    return existsSync(path) ? readFileSync(path, "utf8") : null;
+  };
+  const pngSize = (rel) => {
+    const path = join(exportDir, rel);
+    if (!existsSync(path)) return null;
+    const bytes = readFileSync(path);
+    if (bytes.length < 24 || bytes.toString("latin1", 1, 4) !== "PNG") return null;
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  };
+  const problems = [
+    ...platformProblems({
+      pages: new Map(files.map((file) => [relative(exportDir, file), readFileSync(file, "utf8")])),
+      files: [...sizes.keys()],
+      text: read,
+      size: (rel) => sizes.get(rel.split("\\").join("/")) ?? null,
+      pngSize,
+      indexable,
+      site,
+      brand,
+      serviceWorkerOn: process.env.FLOW_SERVICE_WORKER !== "off",
+    }),
+    ...pagesLimitProblems(sizes),
+  ];
+  for (const problem of problems) failures.push(problem);
+  console.error(
+    `deploy-checks: ${brand}, ${indexable ? "PUBLIC (indexable)" : "closed beta (noindex)"}, ` +
+      `${sizes.size} files for Pages`,
   );
 }
 

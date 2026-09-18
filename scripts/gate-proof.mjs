@@ -258,6 +258,23 @@ function snapshot(roots) {
   return out;
 }
 
+/** Per published episode: the revision its record names, and the folders next to it. */
+function revisionsOf(roots) {
+  const out = new Map();
+  const hls = join(roots.published, SLUG, "hls");
+  if (!existsSync(hls)) return out;
+  for (const episodeSlug of readdirSync(hls)) {
+    const dir = join(hls, episodeSlug);
+    const recordPath = join(dir, "manifest.json");
+    if (!existsSync(recordPath)) continue;
+    out.set(episodeSlug, {
+      revision: JSON.parse(readFileSync(recordPath, "utf8")).revision ?? null,
+      folders: readdirSync(dir).filter((name) => statSync(join(dir, name)).isDirectory()),
+    });
+  }
+  return out;
+}
+
 function sameSnapshot(before, after) {
   const changed = [];
   for (const [rel, hash] of before) if (after.get(rel) !== hash) changed.push(rel);
@@ -396,7 +413,9 @@ acceptance(
   "a vertical master stored sideways with a rotation flag",
   (r) => r.deliver({ masterBuilders: { 1: masters.verticalBehindFlag } }),
   (roots) => {
-    const playlist = readFileSync(join(roots.published, SLUG, "hls", "episode-1", "master.m3u8"), "utf8");
+    const episodeDir = join(roots.published, SLUG, "hls", "episode-1");
+    const { revision } = JSON.parse(readFileSync(join(episodeDir, "manifest.json"), "utf8"));
+    const playlist = readFileSync(join(episodeDir, revision, "master.m3u8"), "utf8");
     const sizes = [...playlist.matchAll(/RESOLUTION=(\d+)x(\d+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
     if (sizes.length === 0 || sizes.some(([w, h]) => w >= h)) {
       return `renditions are not vertical: ${sizes.map((s) => s.join("x")).join(", ")}`;
@@ -417,6 +436,7 @@ acceptance(
     record(name, false, "the first, good delivery was refused", first.output);
   } else {
     const before = snapshot(roots);
+    const revisionsBefore = revisionsOf(roots);
 
     // The studio re-delivers: episode 1 is a new valid master, episode 2 is a
     // recut whose subtitles were cut off halfway.
@@ -467,6 +487,32 @@ acceptance(
       "the fixed delivery resumes what already passed",
       fixed.accepted && resumed === "2" && /packaged now: 0/.test(fixed.output),
       fixed.accepted ? `packaged now 0, resumed ${resumed ?? "?"}` : "the fixed delivery was refused",
+      fixed.output,
+    );
+
+    // A new cut is a new URL: HLS is cached for a year (docs/decisions.md,
+    // batch 5), so the recut may never be served where the old cut was.
+    const revisionsAfter = revisionsOf(roots);
+    const manifestText = readFileSync(join(roots.generated, `${SLUG}.ts`), "utf8");
+    const urlProblems = [];
+    for (const episodeSlug of ["episode-1", "episode-2"]) {
+      const was = revisionsBefore.get(episodeSlug);
+      const now = revisionsAfter.get(episodeSlug);
+      if (!was || !now || was.revision === now.revision) {
+        urlProblems.push(`${episodeSlug} kept revision ${now?.revision ?? "none"}`);
+      } else if (now.folders.length !== 1) {
+        urlProblems.push(`${episodeSlug} holds ${now.folders.length} revision folders`);
+      } else if (!manifestText.includes(`/hls/${episodeSlug}/${now.revision}/master.m3u8`)) {
+        urlProblems.push(`the manifest does not point ${episodeSlug} at ${now.revision}`);
+      }
+    }
+    record(
+      "a new cut is published under a new URL",
+      fixed.accepted && urlProblems.length === 0,
+      urlProblems.join("; ") ||
+        [...revisionsAfter]
+          .map(([slug, entry]) => `${slug} ${revisionsBefore.get(slug)?.revision} → ${entry.revision}`)
+          .join(", "),
       fixed.output,
     );
 

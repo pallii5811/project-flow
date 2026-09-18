@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "next build && node ../../scripts/link-hls-engine.mjs out",
+    "build": "next build && node ../../scripts/link-hls-engine.mjs out && node ../../scripts/finish-export.mjs out",
     "start": "node ../../scripts/serve-static.mjs out 3000",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint"

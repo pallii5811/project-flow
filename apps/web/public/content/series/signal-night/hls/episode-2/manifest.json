@@ -67,5 +67,6 @@
     "freezeRanges": 0,
     "silenceRanges": 0
   },
-  "ffmpeg": "ffmpeg version 8.0.1-full_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers"
+  "ffmpeg": "ffmpeg version 8.0.1-full_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers",
+  "revision": "a8558923fed9"
 }

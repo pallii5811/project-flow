@@ -1,4 +1,4 @@
-/* global window, document, performance, DOMException, HTMLMediaElement, HTMLVideoElement, KeyboardEvent, Navigator, getComputedStyle */
+/* global window, document, performance, DOMException, HTMLMediaElement, KeyboardEvent, Navigator, getComputedStyle */
 /**
  * Real-browser check of the consumer path on the static export
  * (docs/standard.md §4, "a real browser run of open → play → swipe").
@@ -72,6 +72,20 @@
  *  34. over a white frame every rail icon keeps 3:1 against what is behind it;
  *  35. the mute button shrinks under the finger (touch feedback);
  *   6. (extended) any unknown URL answers 404 with the product's page and a story to tap.
+ *
+ * The platform (docs/decisions.md, batch 5), in scripts/e2e-platform.mjs:
+ *  36. headers served as Cloudflare Pages will serve them (_headers);
+ *  37. closed beta by default: noindex, robots.txt, no sitemap;
+ *  38. a manifest Chrome accepts, icons, viewport-fit=cover, theme colour;
+ *  39. the service worker registers after first play and controls the site;
+ *  40. its caches hold no media, catalog or page;
+ *  41. offline: the branded offline page at the address asked for, back by itself;
+ *  42. the script policy and frame-ancestors are enforced;
+ *  43. zero content security policy violations in the whole run;
+ *  44. the install invitation: not in the first minute, once, honest events;
+ *  45. an episode page names itself, and a share points at the configured site.
+ * They also run alone: npm run e2e:web:platform.
+ * The export is served through scripts/serve-static.mjs, which applies _headers.
  * Checks 11 and 15 expect a "Next episode" label without a button (B2-UPNEXT).
  */
 import { Buffer } from "node:buffer";
@@ -81,6 +95,9 @@ import { inflateSync } from "node:zlib";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+
+import { platformChecks, watchContentSecurity } from "./e2e-platform.mjs";
+import { collectAnalytics, installPlayingProbe } from "./lib/e2e-probes.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const SCALE = process.argv.includes("--scale");
@@ -156,24 +173,6 @@ async function waitForServer(child) {
   throw new Error(`static server did not start on ${BASE}`);
 }
 
-/** Every "playing" event, with the episode it belongs to and when it happened. */
-function installPlayingProbe() {
-  window.__flowPlaying = [];
-  document.addEventListener(
-    "playing",
-    (event) => {
-      const video = event.target;
-      const slide =
-        video instanceof HTMLVideoElement ? video.closest("[data-content-id]") : null;
-      window.__flowPlaying.push({
-        contentId: slide ? slide.getAttribute("data-content-id") : null,
-        at: performance.now(),
-      });
-    },
-    true,
-  );
-}
-
 function trackPage(page, label, consoleErrors, mediaRequests, posterRequests = []) {
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(`${label}: ${message.text()}`);
@@ -187,7 +186,7 @@ function trackPage(page, label, consoleErrors, mediaRequests, posterRequests = [
   page.on("requestfinished", async (request) => {
     const { pathname } = new URL(request.url());
     const match =
-      /hls\/episode-(\d+)\/(?:(v\d+)\/)?(?:seg_(\d+)\.m4s|(master)\.m3u8|index\.m3u8|init_\d+\.mp4)/.exec(
+      /hls\/episode-(\d+)\/(?:[0-9a-f]{12}\/)?(?:(v\d+)\/)?(?:seg_(\d+)\.m4s|(master)\.m3u8|index\.m3u8|init_\d+\.mp4)/.exec(
         pathname,
       );
     if (!match) return;
@@ -200,25 +199,6 @@ function trackPage(page, label, consoleErrors, mediaRequests, posterRequests = [
       bytes: sizes ? sizes.responseBodySize : null,
     });
   });
-}
-
-/**
- * Analytics envelopes the page logs (the export has no collector, so the
- * console transport prints each one as "[analytics] <name>", envelope).
- */
-function collectAnalytics(page) {
-  const events = [];
-  page.on("console", async (message) => {
-    const text = message.text();
-    if (!text.startsWith("[analytics] ")) return;
-    const name = text.slice("[analytics] ".length).split(" ")[0];
-    const envelope = await message
-      .args()[1]
-      ?.jsonValue()
-      .catch(() => null);
-    events.push({ name, properties: envelope?.properties ?? null });
-  });
-  return events;
 }
 
 /** The active slide and the message it shows, if any. */
@@ -492,6 +472,9 @@ let browser;
 try {
   await waitForServer(server);
   browser = await chromium.launch({ channel: "chrome", headless: true });
+  // 43: every context from here on reports policy violations.
+  const cspViolations = [];
+  const unwatchedNewContext = watchContentSecurity(browser, cspViolations);
   const context = await browser.newContext({
     viewport: { width: 375, height: 812 },
     deviceScaleFactor: 3,
@@ -1125,7 +1108,8 @@ try {
       );
       const answers = [];
       const start = Date.now();
-      await page.route("**/hls/episode-1/master.m3u8", async (route) => {
+      // The encode sits in its revision folder (hls/episode-1/<revision>/).
+      await page.route("**/hls/episode-1/*/master.m3u8", async (route) => {
         const failing = answers.filter((answer) => answer.status === 503).length < 4;
         answers.push({ status: failing ? 503 : 200, at: Date.now() - start });
         if (failing) await route.fulfill({ status: 503, body: "busy" });
@@ -2557,6 +2541,27 @@ try {
       `${name} is ${bytes} bytes (budget ${HTML_BUDGET_BYTES})`,
     );
   }
+
+  // 36–44: the platform around the feed (scripts/e2e-platform.mjs).
+  await platformChecks({
+    browser,
+    unwatchedNewContext,
+    base: BASE,
+    repoRoot,
+    check,
+    measured,
+    sleep,
+    installPlayingProbe,
+    collectAnalytics,
+    cspViolations,
+    scale: SCALE,
+    firstPlayBudgetMs: FIRST_PLAY_BUDGET_MS,
+    screenshotDir: process.env.FLOW_E2E_SCREENSHOTS ?? null,
+  });
+  check(
+    cspViolations.length === 0,
+    `${cspViolations.length} content security policy violation(s): ${cspViolations.slice(0, 5).join(" | ")}`,
+  );
 
   // 8: console.
   measured.consoleErrors = consoleErrors;

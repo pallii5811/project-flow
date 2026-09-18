@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { BrandMark } from "@/features/platform/BrandMark";
 import { getWebFeedCatalog } from "@/lib/feedCatalog";
 import { notFoundStory } from "@/lib/notFoundStory";
 
@@ -9,6 +10,7 @@ import styles from "./not-found.module.css";
 export const metadata: Metadata = {
   title: "Page not found",
   description: "This link has moved or expired.",
+  robots: { index: false, follow: false },
 };
 
 /**
@@ -21,7 +23,7 @@ export default function NotFound() {
   return (
     <main className={styles.root}>
       <div className={styles.column}>
-        <p className={styles.brand}>PROJECT FLOW</p>
+        <BrandMark className={styles.brand} />
         <div className={styles.message}>
           <p className={styles.kicker}>Page not found</p>
           <h1 className={styles.title}>This link has moved or expired.</h1>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!--
+    The one source of every app icon (scripts/make-icons.mjs).
+    A vertical frame, the shape of a story on a phone. Cut out of it: a play,
+    and an episode's progress stopped short, the moment a cliffhanger leaves
+    you. No letters: the product may still change name, the mark does not.
+    The mark is centred on 256,256 and fits a circle of radius 186, inside the
+    204 px safe zone of a maskable icon.
+  -->
+  <defs>
+    <linearGradient id="ivory" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#F7F0E2" />
+      <stop offset="1" stop-color="#D9C8AC" />
+    </linearGradient>
+    <mask id="cut" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect x="164" y="96" width="184" height="320" rx="44" fill="#fff" />
+      <path
+        d="M231 196 L231 284 L302 240 Z"
+        fill="#000"
+        stroke="#000"
+        stroke-width="16"
+        stroke-linejoin="round"
+      />
+      <rect x="196" y="351" width="84" height="18" rx="9" fill="#000" />
+      <circle cx="280" cy="360" r="17" fill="#000" />
+    </mask>
+  </defs>
+  <rect x="164" y="96" width="184" height="320" rx="44" fill="url(#ivory)" mask="url(#cut)" />
+</svg>

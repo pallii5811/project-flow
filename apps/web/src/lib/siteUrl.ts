@@ -26,3 +26,13 @@ export function resolveSiteUrl(raw: string | undefined): string {
   }
   return url.origin;
 }
+
+/**
+ * The origin a shared link is built on (VIR-8): the configured site, never
+ * the host that happened to serve the page — a preview on *.pages.dev or a
+ * mirror would otherwise split every share across hosts. Only a build that
+ * configured no site (a local run) falls back to the page's own origin.
+ */
+export function shareOrigin(configured: string | undefined, pageOrigin: string): string {
+  return configured?.trim() ? resolveSiteUrl(configured) : pageOrigin;
+}

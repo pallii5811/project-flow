@@ -27,6 +27,10 @@ const nextConfig: NextConfig = {
   output: "export",
   env: {
     NEXT_PUBLIC_APP_VERSION: appVersion(),
+    // One switch for both halves of the service worker: the page does not
+    // register it, and scripts/finish-export.mjs writes a sw.js that retires
+    // any worker a previous deploy installed (docs/deploy.md).
+    NEXT_PUBLIC_SERVICE_WORKER: process.env.FLOW_SERVICE_WORKER === "off" ? "off" : "on",
   },
   transpilePackages: [
     "@project-flow/feed-domain",
