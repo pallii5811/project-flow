@@ -4,6 +4,24 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-18 — Review of 3b: a Tune sheet bounded by the picture, and a side inset paid once, by whoever owes it
+
+**Decision:** The Tune sheet can never grow past the frame it lives in. It is a column no taller than `calc(100% - 56px)`, its header (title and Close) keeps its size, and the chips are the part that gives way: they scroll, with `overscroll-behavior: contain` so the feed behind does not move, and in the short landscape frame a 16 px fade at either end marks that there is more. That fade sits below the header, never over it. The 56 px it gives up is the band of backdrop a finger taps to dismiss the sheet.
+
+The side safe-area insets are added by the chrome inside the picture through `--flow-inset-left` and `--flow-inset-right`, not by `env()` directly. What each piece owes is the distance to the **screen** edge: a frame that letterboxes the picture already stands clear of the notch, declares how wide its band is in `--flow-frame-gap`, and the chrome inside it pays only what is left over — which, measured, is nothing. The page for an unknown URL is a page and not a picture, so it takes `env()` straight.
+
+**Why:** Measured on acf8795, the commit this reviews, with the system Chrome at 740×360 and 568×320: the sheet was 409 px tall in a 360 px frame, `#intent-sheet-title` sat at −30 px and Close at −36 px, no backdrop was left anywhere around it, and a tap in the letterbox hit the stage shell with the dialog still open — a touch-only viewer in landscape could not close it. The first attempt at the side insets added `env()` everywhere: correct on a full-bleed phone, wrong in a letterboxed frame, where it charged a notch that is 269 px away and cut the landscape title column from 137 px to 49 px of text with 11 px of it overflowing.
+
+**Consequences:**
+
+- e2e check 30 now opens the sheet at 740×360 and 568×320 and asserts the title, the Close button and the sheet itself are on screen, that the chips scroll to the last one, and that a tap on the band above it closes the dialog. Check 33 emulates a notch (59/34/44/44 through `Emulation.setSafeAreaInsetsOverride`, which `env()` does resolve in this Chrome even without `viewport-fit=cover`) and measures from the screen edge.
+- Four sabotage runs, each red on its own check and on nothing else, each restored from a copy and compared byte for byte: the sheet unbounded (title at −48 px), the body padding put back (only the notched check goes red — the old one stayed green, which is why it proved nothing), the rail without its inset (6 px of clearance against a 44 px notch), and the letterbox blind to its own band (the title column back to 49 px).
+- Measured after the fix: at 740×360 the sheet spans 56–360 px, its title sits at 71 px and Close at 65 px; with the notch emulated, a full-bleed 375×812 phone moves the rail from 6 px to 50 px of clearance and the title from 18 px to 62 px, while the letterboxed 812×375 frame keeps its 145 px title column with and without the notch.
+
+**Revisit:** When `viewport-fit=cover` lands, or the app runs installed: the insets stop being 0 on real phones and the emulated numbers become checkable against a device.
+
+---
+
 ## 2026-09-17 — Accessibility and polish: keys that respect controls, a real Tune dialog, a player that survives landscape
 
 **Decision:** The feed's global keys never take a key that belongs to someone else: nothing while a dialog is open or inside one, nothing in a text field, nothing with Ctrl, Alt or Meta, and Space on a focused button or link presses that control instead of pausing. The arrow keys still move between episodes from a rail button. The Tune sheet is a modal dialog: focus moves to its first chip, Tab and Shift+Tab wrap inside it, Escape closes it wherever focus is, focus returns to Tune, a visible Close button sits next to its title (`#b3b0a8`, 8.4:1), and the feed behind it is `inert`. A chip says what it did in a notice ("Darker stories are up next", or "Nothing new for that yet" when the catalog had no candidate). Decisions pure in `apps/web/src/features/feed/a11y.ts`.
@@ -14,7 +32,7 @@ Other decisions:
 - Rail toggles keep one name and say their state with `aria-pressed` ("Mute", "Like", "Follow series", "Captions"); state also changes the glyph (filled heart with a short pop, person with a check, filled captions box), never only the colour. Tune uses a sliders glyph.
 - Over a white frame the rail keeps at least 3:1 per icon: a feathered shade behind the rail only (at most 56% black at the edge, fading to nothing 190 px in) and a tight dark edge on each icon. The picture elsewhere is not darkened.
 - A phone in landscape (height ≤ 480 px, any width) gets the uncropped 9:16 frame at full height; the padded desktop frame needs at least 481 px of height. Below 240 px of stage width the title, hook and captions shrink.
-- Safe-area insets are no longer padded on the body: the picture runs full bleed and each piece of chrome adds its inset once.
+- Safe-area insets are no longer padded on the body: the picture runs full bleed and each piece of chrome adds its inset once. (Corrected on 2026-09-18: it did so on the top and the bottom only, and the Close button was visible in a portrait frame only. See the entry below.)
 - Contrast: the episode position at 90% opacity (4.5:1 over a white frame where the scrim sits under it), the playback error on a 62% shade, neighbouring slides no longer dimmed to 55%. `a11y.test.ts` reads these values from the shipped CSS.
 - Any unknown URL answers 404 with the product's page: "This link has moved or expired." and one card that plays the story the feed opens on.
 

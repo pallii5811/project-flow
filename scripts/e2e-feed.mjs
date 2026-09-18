@@ -60,11 +60,15 @@
  *  29. Space on a focused rail button presses that button, never play/pause;
  *  30. the Tune sheet is a dialog: focus moves in, Tab stays in, the feed takes no
  *      keys, Escape closes it from anywhere and focus returns to Tune; Close works;
- *      a chip says what changed;
+ *      a chip says what changed; in a short landscape frame it stays inside the
+ *      picture, its chips scroll to the last one and a tap on the backdrop above
+ *      it closes it (R3B-01);
  *  31. a rail toggle keeps its name and says its state with aria-pressed;
  *  32. an episode change is announced politely and focus follows it from the rail;
- *  33. a phone in landscape narrower than 768 px gets the uncropped 9:16 frame, and
- *      no page scrolls outside the feed;
+ *  33. a phone in landscape narrower than 768 px gets the uncropped 9:16 frame, and,
+ *      with a notch emulated so the insets are not 0, no page scrolls outside the
+ *      feed (R3B-02), the chrome clears the notch on the sides too, and a
+ *      letterboxed frame does not pay it a second time (R3B-03);
  *  34. over a white frame every rail icon keeps 3:1 against what is behind it;
  *  35. the mute button shrinks under the finger (touch feedback);
  *   6. (extended) any unknown URL answers 404 with the product's page and a story to tap.
@@ -2163,10 +2167,109 @@ try {
         `intent events are not one per open and one per choice: ${JSON.stringify(sent.filter((name) => name.startsWith("intent")))}`,
       );
       await sheetContext.close();
+
+      // The same sheet in the short landscape frame (R3B-01). There the stage
+      // is about 200 px wide, the six chips wrap to six rows, and an unbounded
+      // sheet took its title and its Close button off the top of the screen and
+      // left no backdrop to tap — a touch-only viewer could not dismiss it.
+      const shortFrames = {};
+      for (const viewport of [
+        { width: 740, height: 360 },
+        { width: 568, height: 320 },
+      ]) {
+        const shortContext = await browser.newContext({
+          viewport,
+          isMobile: true,
+          hasTouch: true,
+        });
+        await shortContext.addInitScript(installPlayingProbe);
+        const short = await shortContext.newPage();
+        trackPage(short, `tune ${viewport.width}x${viewport.height}`, consoleErrors, []);
+        await short.goto(`${BASE}/watch/signal-night/episode-2`, {
+          waitUntil: "domcontentloaded",
+        });
+        await short.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+          timeout: 10_000,
+        });
+        await short.click('[data-active="true"] [data-action="tune"]');
+        await short
+          .waitForSelector('[role="dialog"]', { timeout: 2_000 })
+          .catch(() => null);
+        await sleep(400);
+        const frame = await short.evaluate(() => {
+          const top = (selector) => {
+            const element = document.querySelector(selector);
+            return element ? Math.round(element.getBoundingClientRect().top) : null;
+          };
+          const sheet = document
+            .querySelector('[data-intent-sheet="true"]')
+            ?.getBoundingClientRect();
+          const chip = document
+            .querySelector("[data-intent-chip]")
+            ?.getBoundingClientRect();
+          return {
+            title: top("#intent-sheet-title"),
+            close: top('[role="dialog"] [aria-label="Close"]'),
+            chipTop: chip ? Math.round(chip.top) : null,
+            chipBottom: chip ? Math.round(chip.bottom) : null,
+            // The band of backdrop left above the sheet: what a finger taps.
+            band: sheet ? Math.round(sheet.top) : null,
+            sheetBottom: sheet ? Math.round(sheet.bottom) : null,
+            height: window.innerHeight,
+          };
+        });
+        // The chips are the part that gives way: the last one has to be
+        // reachable, and to land inside the frame once it is scrolled to.
+        frame.lastChip = await short.evaluate(() => {
+          const chips = [...document.querySelectorAll("[data-intent-chip]")];
+          const row = chips[0]?.parentElement;
+          if (!row || chips.length === 0) return null;
+          row.scrollTop = row.scrollHeight;
+          const box = chips[chips.length - 1].getBoundingClientRect();
+          return {
+            count: chips.length,
+            top: Math.round(box.top),
+            bottom: Math.round(box.bottom),
+            scrollable: row.scrollHeight > row.clientHeight,
+          };
+        });
+        // Tap that band: the sheet must go.
+        await short.mouse.click(Math.round(viewport.width / 2), 20);
+        await sleep(300);
+        frame.closedByTap = await short.evaluate(
+          () => document.querySelector('[role="dialog"]') === null,
+        );
+        shortFrames[`${viewport.width}x${viewport.height}`] = frame;
+        await shortContext.close();
+      }
+      measured.tuneShortFrames = shortFrames;
+      check(
+        Object.values(shortFrames).every(
+          (frame) =>
+            frame.title !== null &&
+            frame.title >= 0 &&
+            frame.close !== null &&
+            frame.close >= 0 &&
+            frame.chipTop !== null &&
+            frame.chipTop >= 0 &&
+            frame.chipBottom <= frame.height &&
+            frame.sheetBottom !== null &&
+            frame.sheetBottom <= frame.height &&
+            frame.band >= 44 &&
+            frame.lastChip !== null &&
+            frame.lastChip.scrollable &&
+            frame.lastChip.top >= 0 &&
+            frame.lastChip.bottom <= frame.height &&
+            frame.closedByTap,
+        ),
+        `in a short landscape frame the Tune sheet runs off the screen or cannot be dismissed by tapping: ${JSON.stringify(shortFrames)}`,
+      );
     }
 
     // 33: a phone in landscape narrower than 768 px (740x360) and a portrait
-    // phone: the 9:16 frame, and no page scroll outside the feed (A11Y-03, A11Y-05).
+    // phone: the 9:16 frame (A11Y-03), and then, with a notch emulated so the
+    // insets are not 0, no page scroll outside the feed (A11Y-05) and chrome
+    // that clears the notch on the sides as well (R3B-03).
     {
       const frames = {};
       for (const viewport of [
@@ -2224,6 +2327,111 @@ try {
       check(
         Object.values(frames).every((frame) => frame.pageScroll <= 0),
         `the page scrolls outside the feed: ${JSON.stringify(frames)}`,
+      );
+
+      // A page scroll of 0 proves nothing about A11Y-05 on its own: without a
+      // notch env(safe-area-inset-*) is 0, so putting the body padding back
+      // would add 0 px and the check would stay green (R3B-02). Emulate a real
+      // notch — top, bottom AND the landscape sides (R3B-03) — and measure
+      // again: only then does a doubled inset push the 100dvh feed off-screen.
+      //
+      // The distance that matters is to the SCREEN edge, not to the picture: a
+      // full-bleed portrait frame has to move its chrome in by the whole inset,
+      // while a letterboxed landscape frame already stands 269 px clear and
+      // must NOT pay it again — that squeezed the title column to 49 px.
+      const notch = { top: 59, bottom: 34, left: 44, right: 44 };
+      const readChrome = () => {
+        const probe = document.createElement("div");
+        probe.style.cssText =
+          "position:fixed;top:env(safe-area-inset-top);left:env(safe-area-inset-left);right:env(safe-area-inset-right)";
+        document.body.appendChild(probe);
+        const style = getComputedStyle(probe);
+        const seen = {
+          top: parseFloat(style.top),
+          left: parseFloat(style.left),
+          right: parseFloat(style.right),
+        };
+        probe.remove();
+        const body = getComputedStyle(document.body);
+        const rail = document
+          .querySelector('[data-active="true"] [role="toolbar"]')
+          ?.getBoundingClientRect();
+        // The overlay box spans the picture; its inset lives in the padding, so
+        // what matters is where its text actually starts, and how much of it is
+        // left to read.
+        const title = document.querySelector('[data-active="true"] h2');
+        const titleBox = title?.getBoundingClientRect();
+        return {
+          seen,
+          bodyPadding: [body.paddingTop, body.paddingRight, body.paddingBottom, body.paddingLeft].join(
+            " ",
+          ),
+          pageScroll: document.documentElement.scrollHeight - window.innerHeight,
+          // Both measured from the screen, which is where the notch is.
+          railClear: rail ? Math.round(window.innerWidth - rail.right) : null,
+          titleClear: titleBox ? Math.round(titleBox.left) : null,
+          titleColumn: title ? Math.round(title.clientWidth) : null,
+          titleOverflow: title ? Math.round(title.scrollWidth - title.clientWidth) : null,
+        };
+      };
+      const notched = {};
+      for (const viewport of [
+        { width: 375, height: 812 },
+        { width: 812, height: 375 },
+      ]) {
+        for (const insets of [null, notch]) {
+          const label = `${viewport.width}x${viewport.height}${insets ? " +notch" : ""}`;
+          const context = await browser.newContext({
+            viewport,
+            isMobile: true,
+            hasTouch: true,
+          });
+          await context.addInitScript(installPlayingProbe);
+          const page = await context.newPage();
+          trackPage(page, `notch ${label}`, consoleErrors, []);
+          if (insets) {
+            const cdp = await context.newCDPSession(page);
+            await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets });
+          }
+          await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+          await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+            timeout: 10_000,
+          });
+          notched[label] = await page.evaluate(readChrome);
+          await context.close();
+        }
+      }
+      measured.safeAreaNotch = { notch, ...notched };
+      const withNotch = [notched["375x812 +notch"], notched["812x375 +notch"]];
+      check(
+        withNotch.every(
+          (frame) =>
+            frame.seen.top === notch.top &&
+            frame.seen.left === notch.left &&
+            frame.seen.right === notch.right,
+        ),
+        `the emulated notch never reached env(safe-area-inset-*), so nothing below is proven: ${JSON.stringify(measured.safeAreaNotch)}`,
+      );
+      check(
+        withNotch.every(
+          (frame) => frame.bodyPadding === "0px 0px 0px 0px" && frame.pageScroll <= 0,
+        ),
+        `with a notch emulated the body pads the 100dvh feed: ${JSON.stringify(measured.safeAreaNotch)}`,
+      );
+      check(
+        withNotch.every(
+          (frame) =>
+            frame.railClear !== null &&
+            frame.railClear >= notch.right &&
+            frame.titleClear !== null &&
+            frame.titleClear >= notch.left,
+        ),
+        `the rail or the title block sits under the notch: ${JSON.stringify(measured.safeAreaNotch)}`,
+      );
+      check(
+        notched["812x375 +notch"].titleColumn === notched["812x375"].titleColumn &&
+          notched["812x375 +notch"].titleOverflow <= 0,
+        `the letterboxed landscape frame pays the notch twice and loses its title column: ${JSON.stringify(measured.safeAreaNotch)}`,
       );
     }
 

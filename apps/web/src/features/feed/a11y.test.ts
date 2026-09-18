@@ -107,6 +107,26 @@ describe("the Tune sheet (A11Y-02, UX-09)", () => {
     expect(sheet).toBeDefined();
     expect(contrastRatio(hex(title!), hex(sheet!))).toBeGreaterThanOrEqual(4.5);
   });
+
+  // R3B-01: in a landscape frame the six chips wrap to six rows. Unbounded, the
+  // sheet grew past the stage and took its title and its Close button with it.
+  it("never grows past the frame, and gives way at the chips", () => {
+    const sheet = block(feedCss, ".sheet");
+    const gap = /max-height:\s*calc\(100% - (\d+)px\)/.exec(sheet)?.[1];
+    expect(gap).toBeDefined();
+    // A band of backdrop wide enough to tap is what closes the sheet.
+    expect(Number(gap)).toBeGreaterThanOrEqual(44);
+    expect(sheet).toMatch(/flex-direction:\s*column/);
+
+    // The header keeps its size so the title and Close never scroll away…
+    expect(block(feedCss, ".sheetHeader")).toMatch(/flex:\s*none/);
+    // …and the chips are the part that scrolls.
+    const chips = block(feedCss, ".chipRow");
+    expect(chips).toMatch(/overflow-y:\s*auto/);
+    expect(chips).toMatch(/min-height:\s*0/);
+    // Scrolling the chips must not drag the feed behind the sheet with it.
+    expect(chips).toMatch(/overscroll-behavior:\s*contain/);
+  });
 });
 
 describe("episode changes for screen readers (A11Y-07)", () => {
@@ -192,6 +212,66 @@ describe("layout rules (A11Y-03, A11Y-05)", () => {
     const globals = read("../../app/globals.css");
     expect(globals).not.toMatch(/env\(safe-area-inset/);
     expect(block(feedCss, ".root")).toMatch(/height:\s*100dvh/);
+  });
+
+  // R3B-03: the body adds no inset, so every piece of chrome has to add its own
+  // on the side it hugs. Only the top and the bottom did, which reads as "once"
+  // but is "never" for left and right — the landscape notch side.
+  it("chrome that hugs a side edge carries that side's inset", () => {
+    for (const [selector, property, base] of [
+      [".rail", "right", "6px"],
+      [".overlay", "right", "68px"],
+      [".seriesEndClose", "right", "8px"],
+    ] as const) {
+      const rule = block(feedCss, selector);
+      expect(rule, selector).toMatch(
+        new RegExp(`${property}:\\s*calc\\(${base} \\+ var\\(--flow-inset-right\\)\\)`),
+      );
+    }
+    // The strip spans the frame: both sides.
+    const strip = block(feedCss, ".strip");
+    expect(strip).toMatch(/left:\s*calc\(14px \+ var\(--flow-inset-left\)\)/);
+    expect(strip).toMatch(/right:\s*calc\(14px \+ var\(--flow-inset-right\)\)/);
+    // The padded surfaces inside the picture: the series end, and the sheet.
+    for (const rule of [block(feedCss, ".seriesEndScroll"), block(feedCss, ".sheet")]) {
+      expect(rule).toMatch(/var\(--flow-inset-left\)/);
+      expect(rule).toMatch(/var\(--flow-inset-right\)/);
+    }
+    // The page for an unknown URL is not inside the picture: it takes the
+    // screen's inset straight.
+    const notFound = block(read("../../app/not-found.module.css"), ".root");
+    expect(notFound).toMatch(/env\(safe-area-inset-left\)/);
+    expect(notFound).toMatch(/env\(safe-area-inset-right\)/);
+    // A centred pill does not hug a side, but it must not grow under one.
+    const pill = /\.notice,\s*\.upNext\s*\{([^}]*)\}/.exec(feedCss)?.[1] ?? "";
+    expect(pill).toMatch(
+      /max-width:[\s\S]*var\(--flow-inset-left\)[\s\S]*var\(--flow-inset-right\)/,
+    );
+  });
+
+  // R3B-03, second half: what the chrome owes is the distance to the SCREEN
+  // edge. A letterboxed frame already stands clear of the notch, and charging
+  // it the inset again cut the title column from 137 px to 49 px of text.
+  it("a letterboxed frame subtracts the band it already keeps clear", () => {
+    const stage = block(feedCss, ".stage");
+    expect(stage).toMatch(/--flow-frame-gap:\s*0px/);
+    for (const side of ["left", "right"] as const) {
+      expect(stage).toMatch(
+        new RegExp(
+          `--flow-inset-${side}:\\s*max\\(0px, env\\(safe-area-inset-${side}\\) - var\\(--flow-frame-gap\\)\\)`,
+        ),
+      );
+    }
+    // Both frames that centre the picture declare how wide their band is.
+    const framed = [
+      /@media \(min-width: 768px\) and \(min-height: 481px\)\s*\{([\s\S]*?)\n\}/,
+      /@media \(orientation: landscape\) and \(max-height: 480px\)\s*\{([\s\S]*?)\n\}/,
+    ];
+    for (const pattern of framed) {
+      const rule = pattern.exec(feedCss)?.[1];
+      expect(rule, String(pattern)).toBeDefined();
+      expect(rule).toMatch(/--flow-frame-gap:\s*calc\(\(100vw - /);
+    }
   });
 });
 

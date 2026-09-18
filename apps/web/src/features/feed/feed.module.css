@@ -30,6 +30,20 @@
    * or a 200% zoom gives a narrow or short stage (R3A-01).
    */
   container: stage / size;
+  /*
+   * The side insets the chrome inside the stage has to add on the edge it hugs
+   * (R3B-03) — the body adds none, so whoever touches an edge pays for it.
+   *
+   * What matters is the distance to the SCREEN edge, not to the stage: the two
+   * rules below letterbox the stage, and that empty band already clears the
+   * notch. Each frame declares how wide its band is, and what is left over is
+   * the only part the chrome still has to give up. Measured at 740x360 with a
+   * 44 px notch: the band is 269 px, so nothing is left over — while adding the
+   * inset anyway cut the title column from 137 px to 49 px of text.
+   */
+  --flow-frame-gap: 0px;
+  --flow-inset-left: max(0px, env(safe-area-inset-left) - var(--flow-frame-gap));
+  --flow-inset-right: max(0px, env(safe-area-inset-right) - var(--flow-frame-gap));
 }
 
 /* A tablet or a desktop window: a padded 9:16 frame. Short windows use the rule below. */
@@ -43,6 +57,8 @@
   .stage {
     width: min(420px, calc((100dvh - 48px) * 9 / 16));
     height: min(100dvh - 48px, calc(420px * 16 / 9));
+    /* The band of window left on either side of the frame (R3B-03). */
+    --flow-frame-gap: calc((100vw - min(420px, (100dvh - 48px) * 9 / 16)) / 2);
     border-radius: 20px;
     box-shadow:
       0 0 0 1px rgba(255, 255, 255, 0.04),
@@ -67,6 +83,8 @@
   .stage {
     width: calc(100dvh * 9 / 16);
     height: 100dvh;
+    /* The band of screen left on either side of the picture (R3B-03). */
+    --flow-frame-gap: calc((100vw - 100dvh * 9 / 16) / 2);
     border-radius: 0;
     contain: layout paint;
   }
@@ -193,10 +211,12 @@
   /* Never higher than the notice slot: captions stay below "Tap for sound". */
   top: calc(64px + env(safe-area-inset-top));
   left: 0;
-  right: 68px;
+  /* Clear of the rail, which the right inset moves in with it (R3B-03). */
+  right: calc(68px + var(--flow-inset-right));
   bottom: 0;
   z-index: 4;
-  padding: 0 18px calc(16px + env(safe-area-inset-bottom));
+  padding: 0 18px calc(16px + env(safe-area-inset-bottom))
+    calc(18px + var(--flow-inset-left));
   color: #f7f5f2;
   display: flex;
   flex-direction: column;
@@ -386,7 +406,7 @@
 
 .rail {
   position: absolute;
-  right: 6px;
+  right: calc(6px + var(--flow-inset-right));
   bottom: calc(100px + env(safe-area-inset-bottom));
   z-index: 5;
   display: flex;
@@ -647,10 +667,21 @@
   animation: gateFade 160ms ease-out both;
 }
 
+/*
+ * The sheet lives inside the stage, and a landscape phone gives a stage about
+ * 200 px wide and 360 px tall: the six chips wrap to six rows and the sheet
+ * grew past the frame, taking its title and its Close button off-screen and
+ * leaving no backdrop to tap (R3B-01). It is now bounded by the frame, keeps
+ * a band of backdrop above it, and the chips scroll under a header that stays.
+ */
 .sheet {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 420px;
-  padding: 8px 10px calc(24px + env(safe-area-inset-bottom)) 18px;
+  max-height: calc(100% - 56px);
+  padding: 8px calc(10px + var(--flow-inset-right))
+    calc(24px + env(safe-area-inset-bottom)) calc(18px + var(--flow-inset-left));
   background: #121214;
   border-radius: 20px 20px 0 0;
   color: #f4f3f1;
@@ -670,6 +701,7 @@
 }
 
 .sheetHeader {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -712,11 +744,54 @@
   outline-offset: 2px;
 }
 
+/*
+ * The chips are the part that gives way when the frame is short. The 4 px of
+ * padding (taken back by the margin, so the chips keep their alignment) leaves
+ * room for a focus ring the scroll box would otherwise cut.
+ */
 .chipRow {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding-right: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 4px 8px 4px 4px;
+  margin: -4px 0 -4px -4px;
+}
+
+/*
+ * The short landscape frame is where the chips have to scroll (R3B-01). The two
+ * fades live on 16 px of padding kept clear BELOW the header — a scrolling chip
+ * pulled up over the title instead, and half a word across the title reads as a
+ * bug. The header gives back the same 16 px, so the first chip keeps its place.
+ */
+@media (orientation: landscape) and (max-height: 480px) {
+  .sheetHeader {
+    min-height: 44px;
+    margin-bottom: 0;
+  }
+
+  .chipRow {
+    padding-top: 16px;
+    padding-bottom: 16px;
+    margin-top: 0;
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 16px,
+      #000 calc(100% - 16px),
+      transparent 100%
+    );
+  }
 }
 
 .chip {
@@ -752,8 +827,8 @@
 
 .strip {
   position: absolute;
-  left: 14px;
-  right: 14px;
+  left: calc(14px + var(--flow-inset-left));
+  right: calc(14px + var(--flow-inset-right));
   bottom: calc(36px + env(safe-area-inset-bottom));
   z-index: 15;
   padding: 16px 16px 14px;
@@ -834,7 +909,7 @@
   top: calc(18px + env(safe-area-inset-top));
   left: 50%;
   z-index: 25;
-  max-width: calc(100% - 48px);
+  max-width: calc(100% - 48px - var(--flow-inset-left) - var(--flow-inset-right));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -982,8 +1057,8 @@
   display: flex;
   flex-direction: column;
   gap: 22px;
-  padding: calc(64px + env(safe-area-inset-top)) 20px
-    calc(28px + env(safe-area-inset-bottom));
+  padding: calc(64px + env(safe-area-inset-top)) calc(20px + var(--flow-inset-right))
+    calc(28px + env(safe-area-inset-bottom)) calc(20px + var(--flow-inset-left));
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1002,7 +1077,7 @@
   position: absolute;
   z-index: 1;
   top: calc(10px + env(safe-area-inset-top));
-  right: 8px;
+  right: calc(8px + var(--flow-inset-right));
   width: 44px;
   height: 44px;
   display: grid;
@@ -1289,8 +1364,9 @@
  */
 @container stage (max-width: 300px) {
   .overlay {
-    right: 56px;
-    padding-left: 12px;
+    /* Still clear of the rail, which the inset moves in with it (R3B-03). */
+    right: calc(56px + var(--flow-inset-right));
+    padding-left: calc(12px + var(--flow-inset-left));
     padding-right: 0;
     gap: 6px;
   }
@@ -1325,8 +1401,8 @@
   }
 
   .seriesEndScroll {
-    padding-left: 16px;
-    padding-right: 16px;
+    padding-left: calc(16px + var(--flow-inset-left));
+    padding-right: calc(16px + var(--flow-inset-right));
   }
 
   .seriesEndTitle {
@@ -1382,7 +1458,7 @@
  */
 @container stage (max-width: 240px) {
   .overlay {
-    padding-left: 10px;
+    padding-left: calc(10px + var(--flow-inset-left));
     gap: 4px;
   }
 

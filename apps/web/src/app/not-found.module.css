@@ -4,8 +4,8 @@
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: calc(32px + env(safe-area-inset-top)) 20px
-    calc(32px + env(safe-area-inset-bottom));
+  padding: calc(32px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
+    calc(32px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
   background: radial-gradient(ellipse 80% 55% at 50% 38%, #141416 0%, #0b0b0c 70%);
   color: #f4f3f1;
 }

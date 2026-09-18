@@ -40,8 +40,11 @@ body {
 /*
  * No safe-area padding here (A11Y-05): the picture runs under the notch and
  * the home indicator, and each piece of chrome (overlay, rail, strip, sheet,
- * notices, series end) adds its own inset once. Padding the body as well
- * counted the insets twice and pushed the 100dvh feed past the screen.
+ * notices, series end) adds its own inset once — on all four sides, the
+ * horizontal ones for the landscape notch, and only as far as the screen edge
+ * really is: see --flow-inset-left in feed.module.css (R3B-03). Padding the
+ * body as well counted the insets twice and pushed the 100dvh feed past the
+ * screen.
  */
 
 a {
