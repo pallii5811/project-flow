@@ -66,12 +66,30 @@ export const REVALIDATE = "public, max-age=0, must-revalidate";
 /**
  * The _headers file (Cloudflare Pages format, see pages-headers.mjs).
  * Cache-Control is never set by "/*": two matching rules would join their
- * values into one broken header.
+ * values into one broken header. Each pattern is written once: Pages keeps
+ * only the last rule of a pattern, so the removals of DOCUMENT_ONLY_HEADERS
+ * go inside the rule that already exists for that pattern, never in a second
+ * one (a second `/_next/static/*` cost every chunk and font its year of cache).
  */
 export function headersFile({ indexable, analyticsEndpoint, mediaBaseUrl } = {}) {
-  const rule = (pattern, ...headers) => [pattern, ...headers.map((header) => `  ${header}`), ""];
-  return [
+  const seen = new Set();
+  const rule = (pattern, ...headers) => {
+    if (seen.has(pattern)) throw new Error(`_headers: "${pattern}" written twice, Pages would keep only the last`);
+    seen.add(pattern);
+    const notADocument = DOCUMENT_ONLY_PATHS.includes(pattern)
+      ? DOCUMENT_ONLY_HEADERS.map((name) => `! ${name}`)
+      : [];
+    return [pattern, ...[...headers, ...notADocument].map((header) => `  ${header}`), ""];
+  };
+  const lines = [
     "# Written by scripts/finish-export.mjs at every build. Edit scripts/lib/platform.mjs, not this file.",
+    "#",
+    "# One rule per pattern: Pages keeps only the last rule written for a pattern.",
+    "# The ! lines take the page-only headers (CSP, X-Frame-Options, Permissions-Policy)",
+    "# off what is never a document: a script, a stylesheet, a font, a segment, the",
+    "# catalog. There they would be about 450 bytes on each of some thirty responses",
+    "# before the first frame and nothing else (measured, docs/decisions.md).",
+    "# nosniff, HSTS, Referrer-Policy and X-Robots-Tag stay on everything.",
     "",
     ...rule(
       "/*",
@@ -108,14 +126,12 @@ export function headersFile({ indexable, analyticsEndpoint, mediaBaseUrl } = {})
     ...rule("/icons/*", "Cache-Control: public, max-age=86400"),
     "# The browser must see a new worker at the next open.",
     ...rule("/sw.js", "Cache-Control: no-cache"),
-    "# Rules for documents only. A script, a stylesheet, a font, a segment or the",
-    "# catalog is never a document, so these would be bytes on every request and",
-    "# nothing else: about 450 per response, some thirty responses before the first",
-    "# frame (measured, docs/decisions.md). nosniff, HSTS and Referrer-Policy stay.",
-    ...DOCUMENT_ONLY_PATHS.flatMap((pattern) =>
-      rule(pattern, ...DOCUMENT_ONLY_HEADERS.map((name) => `! ${name}`)),
-    ),
-  ].join("\n");
+    "# Every video file, poster and caption: never a document.",
+    ...rule("/content/*"),
+  ];
+  const missing = DOCUMENT_ONLY_PATHS.filter((pattern) => !seen.has(pattern));
+  if (missing.length > 0) throw new Error(`_headers: no rule for ${missing.join(", ")}`);
+  return lines.join("\n");
 }
 
 /** Headers that only mean something on a page (or a worker script). */
@@ -124,32 +140,28 @@ export const DOCUMENT_ONLY_HEADERS = ["Content-Security-Policy", "X-Frame-Option
 export const DOCUMENT_ONLY_PATHS = ["/_next/static/*", "/content/*", "/catalog/*"];
 
 /**
- * Link-preview crawlers. They draw the card of a shared link and index
- * nothing for search, so the closed beta keeps its previews: a tester who
- * shares an episode still sends a picture and a title. Search engines stay
- * out (and every page says noindex anyway).
+ * robots.txt. While closed it lets every crawler in ON PURPOSE: what keeps
+ * the beta out of search is the noindex every page and every response
+ * carries (meta robots and X-Robots-Tag), and a crawler only obeys a noindex
+ * it has fetched. A `Disallow: /` would keep it from ever reading one, and a
+ * watch link a tester shares in public could still be listed as a bare
+ * address from the link alone (Google documents the conflict: "noindex"
+ * is ineffective on a page robots.txt blocks). Link previews keep working
+ * for the same reason. The closed and the public file differ by the sitemap
+ * only; the switch that opens the site is the noindex, taken off by
+ * FLOW_PUBLIC=1.
  */
-export const PREVIEW_CRAWLERS = [
-  "facebookexternalhit",
-  "Facebot",
-  "WhatsApp",
-  "Twitterbot",
-  "TelegramBot",
-  "Slackbot-LinkExpanding",
-  "Discordbot",
-  "LinkedInBot",
-];
-
 export function robotsTxt({ indexable, siteUrl }) {
   if (indexable) {
     return ["User-agent: *", "Allow: /", "", `Sitemap: ${siteUrl}/sitemap.xml`, ""].join("\n");
   }
   return [
-    "# Closed beta: no search engine may crawl or index this site (FLOW_PUBLIC unset).",
-    "# Link-preview crawlers may read pages to draw a shared link's card.",
-    ...PREVIEW_CRAWLERS.flatMap((agent) => [`User-agent: ${agent}`, "Allow: /", ""]),
+    "# Closed beta (FLOW_PUBLIC unset): every page and every file says noindex, in the",
+    "# page and in the X-Robots-Tag header. Crawlers may read them, so they see it: one",
+    "# kept out by robots.txt never reads a noindex and can still list a shared link.",
+    "# No sitemap until the site is public.",
     "User-agent: *",
-    "Disallow: /",
+    "Allow: /",
     "",
   ].join("\n");
 }
@@ -193,10 +205,19 @@ export function scriptHash(text) {
 
 const META_POLICY = /<meta http-equiv="Content-Security-Policy" content="[^"]*"\/>/;
 
-/** The meta policy a page must carry: its own inline scripts, by hash. */
+/**
+ * The meta policy a page must carry: its own inline scripts, by hash, and
+ * the workers the header already allows. The browser enforces this policy
+ * and the header's, each on its own; without its own worker-src this one
+ * would fall back to its script-src and refuse the blob: worker hls.js starts
+ * when it runs its transmuxer off the main thread (not with hls.js/light as
+ * the app imports it today, but the day the full build or workerPath is used).
+ */
+export const META_WORKER_SRC = "worker-src 'self' blob:";
+
 export function scriptPolicyFor(html) {
   const hashes = [...new Set(inlineScripts(html).map(scriptHash))];
-  return ["script-src 'self'", ...hashes].join(" ");
+  return `${["script-src 'self'", ...hashes].join(" ")}; ${META_WORKER_SRC}`;
 }
 
 /**

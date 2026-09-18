@@ -151,7 +151,8 @@ export function platformProblems({
     if (!robots?.includes(`Sitemap: ${site}/sitemap.xml`)) fail("robots.txt does not name the sitemap");
   } else {
     if (!noindexHeader) fail("closed beta but _headers sends no X-Robots-Tag: noindex");
-    if (!disallowsAll) fail("closed beta but robots.txt lets every crawler in");
+    // A crawler kept out never reads the noindex, and can still list a shared link.
+    if (disallowsAll) fail("closed beta but robots.txt disallows every crawler, so none can read the noindex");
     if (sitemap !== null) fail("closed beta but the export carries a sitemap.xml");
     if (robots && /^Sitemap:/im.test(robots)) fail("closed beta but robots.txt names a sitemap");
   }
@@ -166,7 +167,13 @@ export function platformProblems({
   for (const [rel, html] of pages) {
     const policy = metaScriptPolicy(html);
     if (policy === null) fail(`${rel} carries no script policy (finish-export did not run)`);
-    else if (policy !== scriptPolicyFor(html)) fail(`${rel}: its script policy does not match its inline scripts`);
+    else {
+      if (policy !== scriptPolicyFor(html)) fail(`${rel}: its script policy does not match its inline scripts`);
+      // Both policies apply: the page's own must not refuse what the header allows hls.js.
+      if (!/(^|;)\s*worker-src [^;]*blob:/.test(policy)) {
+        fail(`${rel}: its meta policy has no worker-src with blob:, so hls.js could not start its worker`);
+      }
+    }
   }
 
   // --- installable: manifest and icons ---------------------------------------

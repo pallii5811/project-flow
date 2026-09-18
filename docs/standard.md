@@ -208,6 +208,13 @@ headers are now left off scripts, fonts, media and the catalog. Pages speaks HTT
 so the local figure bounds the cost from above. Real installs, iOS Safari and a real
 Cloudflare edge are not measured.
 
+Review of batch 5, same day: the `_headers` of that run wrote `/_next/static/*` and
+`/catalog/*` twice, and Pages keeps only the last rule of a pattern, so on a real edge the
+year of cache in the table above would have been lost (the local server applied every rule
+and showed it). The file now writes each pattern once and the local server reads it the
+way Pages does, so the table holds for what Pages will be sent; step 7 of
+`docs/deploy.md` reads it on the real edge after the first deploy.
+
 ## 4. Definition of done
 
 On top of the quality bar in [`docs/product-principles.md`](product-principles.md):

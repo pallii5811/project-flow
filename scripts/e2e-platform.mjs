@@ -1,4 +1,4 @@
-/* global window, document, performance, caches, navigator, getComputedStyle, KeyboardEvent, Event, HTMLVideoElement */
+/* global window, document, performance, caches, navigator, getComputedStyle, KeyboardEvent, Event, HTMLVideoElement, Blob, Worker */
 /**
  * The platform around the feed, in the real browser (docs/decisions.md,
  * batch 5). Run by scripts/e2e-feed.mjs after its own checks:
@@ -7,8 +7,9 @@
  *      (_headers): immutable where files never change, short where they do,
  *      nosniff and HSTS on every response, the document policies (CSP,
  *      frame and permissions) on pages, the 404 and the worker only;
- *  37. closed beta by default: noindex in the page and in the headers,
- *      robots.txt keeps search engines out, no sitemap;
+ *  37. closed beta by default: noindex in the page and in the headers of
+ *      every file, robots.txt lets crawlers read it (one kept out never
+ *      would), no sitemap;
  *  38. the web app manifest is one Chrome accepts, with its icons, and the
  *      page asks for edge-to-edge (viewport-fit=cover) and dark bars;
  *  39. the service worker registers after the first episode plays, for the
@@ -18,8 +19,10 @@
  *  41. offline, a page opens as the branded offline page at the address asked
  *      for, drawn with its own styles and fonts, and it comes back to the
  *      episode by itself when the network does;
- *  42. the policy is enforced: an inline script that is not in the page as
- *      built does not run, and no site can frame the player;
+ *  42. the policy allows a blob: worker as hls.js makes one, under both the
+ *      header and the page's own meta policy, and it is enforced: an inline
+ *      script that is not in the page as built does not run, and no site can
+ *      frame the player;
  *  43. zero policy violations in the whole run (every context is watched);
  *  44. the install invitation: never in the first minute, then once, at the
  *      top (below an emulated notch), without taking focus, measured by
@@ -99,6 +102,38 @@ const NEVER_CACHED = /\/content\/|\/catalog\/|\/watch\/|\.m3u8|\.m4s|\.mp4|\.web
 
 function waitForFirstPlaying(page, timeout = 15_000) {
   return page.waitForFunction(() => window.__flowPlaying?.length > 0, null, { timeout });
+}
+
+/**
+ * Taps a button of the episode on screen where a finger would: at its centre,
+ * once it has held still for a few frames, with no scroll before. Playwright's
+ * own click scrolls its target into view first, and inside the scroll-snap
+ * feed that scroll can land on the next episode: measured 1 run in 12 on check
+ * 45, when the rail was re-rendered as the catalog arrived, the click retried
+ * with a scroll ("element is outside of the viewport") and the feed moved to
+ * episode 3 before the tap. The app itself scrolled nothing (scrollIntoView,
+ * scrollTo, scrollBy and focus traced: no call).
+ */
+async function tapActiveRailButton(page, label) {
+  const handle = await page.waitForFunction(
+    (name) => {
+      const button = document.querySelector(`[data-active="true"] [aria-label="${name}"]`);
+      const rect = button?.getBoundingClientRect();
+      const inView = rect && rect.width > 0 && rect.top >= 0 && rect.bottom <= window.innerHeight;
+      const at = inView ? `${Math.round(rect.left)},${Math.round(rect.top)}` : null;
+      const probe = (window.__flowTapProbe ??= { at: null, frames: 0 });
+      probe.frames = at !== null && at === probe.at ? probe.frames + 1 : 0;
+      probe.at = at;
+      return probe.frames >= 3 ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
+    },
+    label,
+    { timeout: 10_000, polling: "raf" },
+  );
+  const { x, y } = await handle.jsonValue();
+  await page.evaluate(() => {
+    window.__flowTapProbe = undefined;
+  });
+  await page.mouse.click(x, y);
 }
 
 /** Moves the active episode to its last half second, so it ends now. */
@@ -194,6 +229,8 @@ export async function platformChecks({
   ];
   const DOCUMENTS = new Set(["/", "/watch/signal-night/episode-2", "/sw.js"]);
   measured.headersServed = {};
+  // Read by check 37: the noindex must reach every file, not only the pages.
+  const withoutNoindex = [];
   for (const [path, expected] of expectations) {
     if (!path) {
       check(false, `headers: no URL found for an expectation of "${expected}"`);
@@ -202,6 +239,7 @@ export async function platformChecks({
     const response = await fetch(`${base}${path}`, { method: "HEAD" });
     const headers = Object.fromEntries(response.headers);
     measured.headersServed[path] = headers["cache-control"];
+    if (!/noindex/.test(headers["x-robots-tag"] ?? "")) withoutNoindex.push(path);
     check(response.ok, `headers: ${path} answered ${response.status}`);
     check(
       headers["cache-control"] === expected,
@@ -246,19 +284,24 @@ export async function platformChecks({
     `the manifest is served as ${manifestResponse.headers.get("content-type")}`,
   );
 
-  // 37: closed beta by default.
+  // 37: closed beta by default. The noindex is what keeps it out of search, so
+  // robots.txt must let crawlers read it: a crawler kept out never sees it.
   const robots = await (await fetch(`${base}/robots.txt`)).text();
   const sitemap = await fetch(`${base}/sitemap.xml`);
+  const starGroup = robots.split(/\n\s*\n/).find((group) => /^User-agent:\s*\*\s*$/im.test(group)) ?? "";
   measured.closedBeta = {
     metaRobots: /<meta name="robots" content="([^"]*)"/.exec(homeHtml)?.[1] ?? null,
     xRobotsTag: home.headers.get("x-robots-tag"),
-    robotsDisallowsAll: /User-agent: \*\nDisallow: \//.test(robots),
+    filesWithoutNoindex: withoutNoindex,
+    robotsLetsCrawlersRead: /^Allow:\s*\/\s*$/im.test(starGroup) && !/^Disallow:\s*\/\s*$/im.test(starGroup),
     sitemapStatus: sitemap.status,
   };
   check(
     /noindex/.test(measured.closedBeta.metaRobots ?? "") &&
       /noindex/.test(measured.closedBeta.xRobotsTag ?? "") &&
-      measured.closedBeta.robotsDisallowsAll &&
+      withoutNoindex.length === 0 &&
+      measured.closedBeta.robotsLetsCrawlersRead &&
+      !/^Sitemap:/im.test(robots) &&
       sitemap.status === 404,
     `the default export is not a closed beta: ${JSON.stringify(measured.closedBeta)}`,
   );
@@ -482,6 +525,25 @@ export async function platformChecks({
       if (CSP_MESSAGE.test(message.text())) refused.push(message.text().slice(0, 160));
     });
     await page.goto(`${base}/`, { waitUntil: "load" });
+    // What hls.js does when it runs its transmuxer in a worker: a worker made
+    // from a blob. Both policies apply, the header's and the page's own meta
+    // policy, so each must allow it (hls.js/light as imported today never
+    // does; the full build or workerPath would).
+    const blobWorker = await page.evaluate(async () => {
+      try {
+        const url = URL.createObjectURL(new Blob(["postMessage('ready')"], { type: "text/javascript" }));
+        const worker = new Worker(url);
+        return await new Promise((done) => {
+          worker.onmessage = (event) => done(event.data);
+          worker.onerror = () => done("error");
+          setTimeout(() => done("timeout"), 3_000);
+        });
+      } catch (error) {
+        return `threw ${error.name}`;
+      }
+    });
+    await sleep(200);
+    const refusedByWorker = refused.length;
     const injected = await page.evaluate(async () => {
       const script = document.createElement("script");
       script.textContent = "window.__flowInjected = true;";
@@ -494,7 +556,11 @@ export async function platformChecks({
     await sleep(1_500);
     const frameUrl = framer.frames()[1]?.url() ?? null;
     const framedFeed = await framer.frames()[1]?.evaluate(() => document.querySelector('[role="feed"]') !== null).catch(() => false);
-    measured.policyEnforced = { injectedRan: injected, refused: refused.length, frameUrl, framedFeed };
+    measured.policyEnforced = { blobWorker, refusedByWorker, injectedRan: injected, refused: refused.length, frameUrl, framedFeed };
+    check(
+      blobWorker === "ready" && refusedByWorker === 0,
+      `a blob: worker, as hls.js makes one, did not start: ${blobWorker}, ${refused.slice(0, refusedByWorker).join(" | ")}`,
+    );
     check(!injected, "an inline script that is not in the page as built ran: the script policy is not enforced");
     check(refused.length > 0, "the injected script was not reported as a policy violation");
     check(framedFeed !== true, `another page framed the feed (frame at ${frameUrl})`);
@@ -524,7 +590,7 @@ export async function platformChecks({
       siteName: document.querySelector('meta[property="og:site_name"]')?.getAttribute("content") ?? null,
       canonical: document.querySelector('link[rel="canonical"]')?.getAttribute("href") ?? null,
     }));
-    await page.click('[data-active="true"] [aria-label="Share"]');
+    await tapActiveRailButton(page, "Share");
     await page.waitForFunction(() => window.__flowShared.length > 0, null, { timeout: 5_000 }).catch(() => {});
     const shared = await page.evaluate(() => window.__flowShared[0] ?? null);
     await context.close();

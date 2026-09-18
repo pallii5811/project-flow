@@ -6,7 +6,7 @@
  *
  * Writes into the export:
  *   _headers             caching, security headers, noindex while the beta is closed
- *   robots.txt           closed: search engines out; public: everything in, with the sitemap
+ *   robots.txt           crawlers in (so they read the noindex); public: with the sitemap
  *   sitemap.xml          only when FLOW_PUBLIC=1
  *   offline-shell.html   the offline page without the app's scripts, for the service worker
  *   sw.js                the service worker of this build (or one that retires it)
@@ -125,5 +125,5 @@ console.error(
     `service worker ${serviceWorkerOn ? `${version}, ${precache.size} files in the offline shell` : "RETIRING"}; ` +
     (indexable
       ? `PUBLIC: indexable, sitemap of ${watchPaths.length + 1} pages`
-      : "closed beta: noindex, robots.txt keeps search engines out"),
+      : "closed beta: noindex on every page and file, no sitemap"),
 );

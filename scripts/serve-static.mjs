@@ -11,8 +11,9 @@
  * Headers: when the export has a `_headers` file (scripts/finish-export.mjs
  * writes one), every response gets the headers Pages would send for its path,
  * read by the same parser the export check uses (scripts/lib/pages-headers.mjs),
- * on top of Pages' own default Cache-Control. Without the file, nothing is
- * cached (an older export, served as before).
+ * on top of Pages' own default Cache-Control, with a pattern written twice
+ * reduced to its last rule as Pages does, and a 404 never cached. Without the
+ * file, nothing is cached (an older export, served as before).
  */
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
@@ -25,9 +26,10 @@ const root = resolve(dirArg);
 const port = Number(portArg);
 
 const headersPath = join(root, "_headers");
-const pagesRules = existsSync(headersPath)
-  ? parseHeadersFile(readFileSync(headersPath, "utf8")).rules
-  : null;
+const pagesHeaders = existsSync(headersPath) ? parseHeadersFile(readFileSync(headersPath, "utf8")) : null;
+const pagesRules = pagesHeaders ? pagesHeaders.rules : null;
+// Served as Pages would serve them (last rule of a pattern wins), and said aloud.
+for (const problem of pagesHeaders?.problems ?? []) console.warn(`serve-static: _headers: ${problem}`);
 /** What Pages sends on a static asset no rule overrides. */
 const PAGES_DEFAULT_CACHE = "public, max-age=0, must-revalidate";
 
@@ -90,9 +92,11 @@ const server = createServer((request, response) => {
     "content-type": MIME[extname(file.path).toLowerCase()] ?? "application/octet-stream",
     "accept-ranges": "bytes",
     ...(pagesRules
-      ? { "cache-control": PAGES_DEFAULT_CACHE, ...headersFor(pagesRules, pathname) }
+      ? headersFor(pagesRules, pathname, { "cache-control": PAGES_DEFAULT_CACHE })
       : { "cache-control": "no-store" }),
   };
+  // Pages never lets _headers cache a 404 (pages-shared/asset-server/handler.ts).
+  if (status === 404) headers["cache-control"] = "no-store";
 
   const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range ?? "");
   if (status === 200 && range && (range[1] || range[2])) {

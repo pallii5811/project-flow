@@ -75,12 +75,12 @@
  *
  * The platform (docs/decisions.md, batch 5), in scripts/e2e-platform.mjs:
  *  36. headers served as Cloudflare Pages will serve them (_headers);
- *  37. closed beta by default: noindex, robots.txt, no sitemap;
+ *  37. closed beta by default: noindex everywhere, readable by crawlers, no sitemap;
  *  38. a manifest Chrome accepts, icons, viewport-fit=cover, theme colour;
  *  39. the service worker registers after first play and controls the site;
  *  40. its caches hold no media, catalog or page;
  *  41. offline: the branded offline page at the address asked for, back by itself;
- *  42. the script policy and frame-ancestors are enforced;
+ *  42. a blob: worker (as hls.js makes one) starts; the script policy and frame-ancestors are enforced;
  *  43. zero content security policy violations in the whole run;
  *  44. the install invitation: not in the first minute, once, honest events;
  *  45. an episode page names itself, and a share points at the configured site.

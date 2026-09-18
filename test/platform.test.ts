@@ -53,7 +53,41 @@ describe("the _headers format, read as Pages reads it", () => {
     expect(headersFor(rules, "/b")).toEqual({ "x-a": "one", "cache-control": "no-store" });
   });
 
+  it("keeps one rule per pattern, as Pages does: the last one written, in the place of the first", () => {
+    // The shape that cost every chunk its year of cache (review R5-1).
+    const text = [
+      "/*",
+      "  Content-Security-Policy: default-src 'self'",
+      "  X-Content-Type-Options: nosniff",
+      "/_next/static/*",
+      "  Cache-Control: public, max-age=31536000, immutable",
+      "/sw.js",
+      "  Cache-Control: no-cache",
+      "/_next/static/*",
+      "  ! Content-Security-Policy",
+      "",
+    ].join("\n");
+    const { rules, problems } = parseHeadersFile(text);
+    expect(problems.join()).toMatch(/"\/_next\/static\/\*" is written on line 4 and again on line 8: Pages keeps only the rule on line 8, and drops Cache-Control/);
+    expect(rules.map((rule) => rule.pattern)).toEqual(["/*", "/_next/static/*", "/sw.js"]);
+    expect(headersFor(rules, "/_next/static/a.js")).toEqual({ "x-content-type-options": "nosniff" });
+    // With Pages' own Cache-Control underneath, what a phone would get.
+    expect(headersFor(rules, "/_next/static/a.js", { "Cache-Control": "public, max-age=0, must-revalidate" })).toEqual({
+      "cache-control": "public, max-age=0, must-revalidate",
+      "x-content-type-options": "nosniff",
+    });
+  });
+
+  it("applies rules in the order of the file: a removal takes out only what came before it", () => {
+    const { rules } = parseHeadersFile(
+      ["/a/*", "  ! X-B", "  X-A: one", "/*", "  X-B: two", "  X-A: two", ""].join("\n"),
+    );
+    expect(headersFor(rules, "/a/b")).toEqual({ "x-a": "one, two", "x-b": "two" });
+    expect(headersFor(rules, "/a/b", { "cache-control": "base" })).toMatchObject({ "cache-control": "base" });
+  });
+
   it("reports what Pages would refuse", () => {
+    expect(parseHeadersFile("/a\n  !X-A\n").problems.join()).toMatch(/not "Name: value"/);
     expect(parseHeadersFile("/a/*/b/*\n  X: y\n").problems.join()).toMatch(/more than one splat/);
     expect(parseHeadersFile("  X: y\n").problems.join()).toMatch(/before any URL pattern/);
     expect(parseHeadersFile(`/a\n  X: ${"y".repeat(2_001)}\n`).problems.join()).toMatch(/characters/);
@@ -64,6 +98,19 @@ describe("the _headers format, read as Pages reads it", () => {
 describe("what the export sends", () => {
   const rules = parseHeadersFile(headersFile({ indexable: false })).rules;
   const cache = (path: string) => headersFor(rules, path)["cache-control"];
+
+  it("writes each pattern once, so Pages reads what is written", () => {
+    for (const indexable of [false, true]) {
+      const text = headersFile({ indexable });
+      expect(parseHeadersFile(text).problems).toEqual([]);
+      const patterns = text.split("\n").filter((line) => line.startsWith("/"));
+      expect(new Set(patterns).size).toBe(patterns.length);
+    }
+    // The page-only headers are taken off inside the rule that caches for a year.
+    expect(headersFile({ indexable: false })).toContain(
+      `/_next/static/*\n  Cache-Control: ${IMMUTABLE}\n  ! Content-Security-Policy\n  ! X-Frame-Options\n  ! Permissions-Policy\n`,
+    );
+  });
 
   it("caches for a year only what never changes", () => {
     expect(cache("/_next/static/chunks/main-abc.js")).toBe(IMMUTABLE);
@@ -149,7 +196,9 @@ describe("the content security policy", () => {
     const html = '<html><head><meta charSet="utf-8"/></head><body><script>a()</script><script src="/x.js"></script><script type="application/ld+json">{}</script><script>b()</script></body></html>';
     expect(inlineScripts(html)).toEqual(["a()", "b()"]);
     const withPolicy = withScriptPolicy(html);
-    expect(metaScriptPolicy(withPolicy)).toBe(`script-src 'self' ${scriptHash("a()")} ${scriptHash("b()")}`);
+    expect(metaScriptPolicy(withPolicy)).toBe(
+      `script-src 'self' ${scriptHash("a()")} ${scriptHash("b()")}; worker-src 'self' blob:`,
+    );
     // The policy sits before the first script it covers.
     expect(withPolicy.indexOf("Content-Security-Policy")).toBeLessThan(withPolicy.indexOf("<script>"));
     // Idempotent: a second pass replaces, never stacks.
@@ -159,12 +208,16 @@ describe("the content security policy", () => {
 });
 
 describe("the closed-beta switch in robots.txt and the sitemap", () => {
-  it("keeps search engines out while closed, but lets link previews draw", () => {
+  it("lets crawlers read the noindex while closed, and names no sitemap", () => {
+    // A crawler kept out by Disallow never reads the noindex (review R5-3);
+    // the pages and the X-Robots-Tag header are what keep the beta out.
     const robots = robotsTxt({ indexable: false, siteUrl: SITE });
-    expect(robots).toMatch(/User-agent: \*\nDisallow: \/\n/);
-    expect(robots).toMatch(/User-agent: WhatsApp\nAllow: \//);
+    expect(robots).toMatch(/User-agent: \*\nAllow: \/\n/);
+    expect(robots).not.toMatch(/Disallow/);
     expect(robots).not.toMatch(/Sitemap:/);
-    expect(robots).not.toMatch(/Googlebot|bingbot/i);
+    expect(headersFor(parseHeadersFile(headersFile({ indexable: false })).rules, "/watch/s/e")["x-robots-tag"]).toBe(
+      "noindex, nofollow",
+    );
   });
 
   it("opens everything and names the sitemap when public", () => {
@@ -417,6 +470,21 @@ describe("the export check", () => {
       /\/catalog\/feed\.json gets Cache-Control/,
     ],
     [
+      "the page-only removals in a second /_next/static/* rule (the layout of 6a32609)",
+      () =>
+        setText(
+          good,
+          "_headers",
+          `${headers.replace(/\n {2}! [^\n]+/g, "")}\n/_next/static/*\n  ! Content-Security-Policy\n/catalog/*\n  ! Content-Security-Policy\n`,
+        ),
+      /"\/_next\/static\/\*" is written on line \d+ and again[\s\S]*\/_next\/static\/chunks\/main\.js gets Cache-Control "\(Pages default\)"[\s\S]*\/catalog\/feed\.json gets Cache-Control "\(Pages default\)"/,
+    ],
+    [
+      "a page whose own policy refuses the blob: worker",
+      () => mapPage(good, "index.html", (html) => html.replace("; worker-src 'self' blob:", "")),
+      /index\.html: its meta policy has no worker-src with blob:/,
+    ],
+    [
       "Cache-Control set by /* too",
       () => setText(good, "_headers", headers.replace("  X-Content-Type-Options: nosniff", "  X-Content-Type-Options: nosniff\n  Cache-Control: no-store")),
       /gets Cache-Control "no-store, /,
@@ -439,9 +507,14 @@ describe("the export check", () => {
       /no X-Robots-Tag: noindex/,
     ],
     [
-      "closed beta with robots.txt open",
+      "closed beta with the public robots.txt",
       () => setText(good, "robots.txt", robotsTxt({ indexable: true, siteUrl: SITE })),
-      /robots\.txt lets every crawler in/,
+      /closed beta but robots\.txt names a sitemap/,
+    ],
+    [
+      "closed beta whose robots.txt keeps every crawler from reading the noindex (review R5-3)",
+      () => setText(good, "robots.txt", "User-agent: WhatsApp\nAllow: /\n\nUser-agent: *\nDisallow: /\n"),
+      /closed beta but robots\.txt disallows every crawler, so none can read the noindex/,
     ],
     [
       "closed beta with a sitemap",
@@ -548,9 +621,14 @@ describe("the export check", () => {
       /sends X-Robots-Tag: noindex/,
     ],
     [
-      "FLOW_PUBLIC=1 with robots.txt closed",
+      "FLOW_PUBLIC=1 with the closed-beta robots.txt",
       () => setText(open, "robots.txt", robotsTxt({ indexable: false, siteUrl: SITE })),
-      /disallows every crawler/,
+      /robots\.txt does not name the sitemap/,
+    ],
+    [
+      "FLOW_PUBLIC=1 with a robots.txt that keeps every crawler out",
+      () => setText(open, "robots.txt", `User-agent: *\nDisallow: /\n\nSitemap: ${SITE}/sitemap.xml\n`),
+      /FLOW_PUBLIC=1 but robots\.txt disallows every crawler/,
     ],
     ["FLOW_PUBLIC=1 without a sitemap", () => setText(open, "sitemap.xml", null), /no sitemap\.xml/],
     [
