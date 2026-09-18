@@ -11,7 +11,8 @@
  *     every swipe, and the viewer who turned the sound on turns it off;
  *   - audio present, and not silent: an episode that ships without dialogue
  *     is unwatchable in a feed that most people open muted;
- *   - black or frozen opening: the first second is the whole hook;
+ *   - black or frozen opening: the first second is the whole hook; later in
+ *     the episode only a still far longer than any shot is a frozen master;
  *   - shape and length: a horizontal, low or six-minute "episode" breaks the
  *     feed it is swiped into;
  *   - the same master twice: a duplicate episode looks like a bug to the
@@ -42,8 +43,14 @@ export const QUALITY_RULES = {
   /** Black or silence at least this long inside the opening fails. */
   blackOpeningMaxSeconds: 0.5,
   silenceOpeningMaxSeconds: 1.5,
-  /** A still picture this long anywhere is a frozen master, not a slow shot. */
-  freezeMaxSeconds: 1.5,
+  /** A still picture this long inside the opening: the hook does not move. */
+  freezeOpeningMaxSeconds: 1.5,
+  /**
+   * After the opening a still picture is a shot — a text message on a phone,
+   * a fade to black, an end card, a freeze-frame cliffhanger — until it lasts
+   * this long. Past it, the master itself froze.
+   */
+  freezeMaxSeconds: 10,
   /** More silence than this over the whole episode: no dialogue track. */
   silenceTotalMaxFraction: 0.5,
 };
@@ -262,13 +269,28 @@ export function checkPicture(detections, durationMs, options = {}) {
     }
   }
 
+  // Two different questions. In the opening, any still picture longer than a
+  // beat costs the hook. Later, a still picture is a shot — short drama ends
+  // on fades, end cards and freeze-frames — and only a still far longer than
+  // any shot means the master froze.
   for (const range of detections.freeze) {
     const duration = range.duration ?? Math.max(0, durationMs / 1000 - range.start);
+    const end = range.start + duration;
+    const insideOpening = Math.min(end, openingEnd) - Math.max(range.start, 0);
+    if (insideOpening >= rules.freezeOpeningMaxSeconds) {
+      issues.push(
+        issue(
+          "frozen_opening",
+          `the picture is still for ${insideOpening.toFixed(2)} s in the first ${openingEnd} s (from ${range.start.toFixed(2)} s): no hook`,
+        ),
+      );
+      break;
+    }
     if (duration >= rules.freezeMaxSeconds) {
       issues.push(
         issue(
           "frozen_picture",
-          `the picture is still for ${duration.toFixed(2)} s from ${range.start.toFixed(2)} s`,
+          `the picture is still for ${duration.toFixed(2)} s from ${range.start.toFixed(2)} s: longer than any shot, the master froze`,
         ),
       );
       break;
@@ -276,6 +298,32 @@ export function checkPicture(detections, durationMs, options = {}) {
   }
 
   return issues;
+}
+
+/**
+ * The picture as the viewer sees it. Phones and some editors store a vertical
+ * picture as landscape pixels plus a rotation flag (or the reverse); ffmpeg
+ * applies the flag when it decodes, so the shape rules must too — otherwise a
+ * landscape picture passes as vertical and ships landscape renditions.
+ */
+export function displayDimensions(stream) {
+  const width = Number(stream?.width);
+  const height = Number(stream?.height);
+  let rotation = 0;
+  for (const entry of stream?.side_data_list ?? []) {
+    const value = Number(entry?.rotation);
+    if (Number.isFinite(value) && value !== 0) rotation = value;
+  }
+  const tagged = Number(stream?.tags?.rotate);
+  if (rotation === 0 && Number.isFinite(tagged)) rotation = tagged;
+  const quarterTurns = Math.round(rotation / 90);
+  const normalized = (((quarterTurns % 4) + 4) % 4) * 90;
+  const swapped = normalized === 90 || normalized === 270;
+  return {
+    width: swapped ? height : width,
+    height: swapped ? width : height,
+    rotation: normalized,
+  };
 }
 
 /** Silence where dialogue should be. */

@@ -15,8 +15,18 @@ export const CAPTION_RULES = {
   leadInMaxSeconds: 10,
   /** How far past the end of the episode the last cue may reach. */
   overrunToleranceSeconds: 1,
-  /** The last cue must land at least this far into the episode. */
-  tailMinFraction: 0.5,
+  /**
+   * The last cue must land at least this far into the episode. Short drama
+   * talks to the cliffhanger; a file that goes quiet for the last 40% was
+   * cut short, or belongs to another cut.
+   */
+  tailMinFraction: 0.6,
+  /**
+   * A tail with no text longer than both of these passes, but the report
+   * names it: 20% of a 90 s episode is 18 s of nothing to read.
+   */
+  tailWarnFraction: 0.8,
+  tailWarnMinSeconds: 5,
   /** Total cue time against episode length: below this the file is nearly empty. */
   coverageMinFraction: 0.3,
   /** A single cue longer than this is a conversion error, not a line. */
@@ -78,15 +88,62 @@ export function parseVttCues(raw) {
   return { cues, errors };
 }
 
-/** SRT as studios deliver it → WebVTT. Nothing else is changed. */
+/**
+ * SRT as studios deliver it → WebVTT. Nothing else is changed.
+ *
+ * Only the cue index — a number on the line right before a timing line — is
+ * dropped. A line of dialogue that is just a number ("47") stays: it is text.
+ */
 export function srtToVtt(raw) {
-  const body = stripBom(String(raw))
-    .replace(/\r\n?/g, "\n")
-    .replace(/^\s*\d+\s*$/gm, "")
-    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2")
+  const lines = stripBom(String(raw)).replace(/\r\n?/g, "\n").split("\n");
+  const kept = lines.filter(
+    (line, index) => !(/^\s*\d+\s*$/.test(line) && (lines[index + 1] ?? "").includes("-->")),
+  );
+  const body = kept
+    .map((line) =>
+      line.includes("-->") ? line.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2") : line,
+    )
+    .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return `WEBVTT\n\n${body}\n`;
+}
+
+/**
+ * A BCP-47 tag the way deliveries write them: a 2- or 3-letter primary
+ * language ("en", "fil", "yue"), then optional subtags ("pt-BR", "zh-Hant").
+ */
+export function isLanguageTag(value) {
+  return typeof value === "string" && /^[a-z]{2,3}(-[A-Za-z0-9]{1,8})*$/.test(value);
+}
+
+/** Does a licence for these languages cover this tag? "es" covers "es-419". */
+export function isLicensedLanguage(tag, licensed) {
+  if (!isLanguageTag(tag) || !Array.isArray(licensed)) return false;
+  const lower = tag.toLowerCase();
+  return licensed.some((entry) => {
+    if (typeof entry !== "string") return false;
+    const allowed = entry.toLowerCase();
+    return lower === allowed || lower.startsWith(`${allowed}-`);
+  });
+}
+
+/**
+ * What passes but deserves a look: a file whose last cue lands well before the
+ * end. Returned, never thrown, and never a refusal on its own.
+ */
+export function captionNotes(parsed, durationMs, rules = CAPTION_RULES) {
+  const cues = parsed.cues;
+  if (cues.length === 0 || !(durationMs > 0)) return [];
+  const lastEnd = cues.reduce((latest, cue) => Math.max(latest, cue.endMs), 0);
+  if (lastEnd >= durationMs * rules.tailWarnFraction) return [];
+  if (durationMs - lastEnd < rules.tailWarnMinSeconds * 1000) return [];
+  return [
+    issue(
+      "quiet_tail",
+      `the last cue ends at ${(lastEnd / 1000).toFixed(1)} s of ${(durationMs / 1000).toFixed(1)} s: ${((durationMs - lastEnd) / 1000).toFixed(1)} s with no text — check it is the full file`,
+    ),
+  ];
 }
 
 /**
@@ -99,7 +156,7 @@ export function checkCaptionTrack(parsed, options) {
   const issues = [...parsed.errors];
   const cues = parsed.cues;
 
-  if (!language || !/^[a-z]{2}(-[A-Za-z0-9]+)*$/.test(language)) {
+  if (!isLanguageTag(language)) {
     issues.push(issue("missing_language", `"${String(language)}" is not a language tag`));
   }
   if (cues.length === 0) {

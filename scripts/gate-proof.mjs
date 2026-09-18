@@ -1,27 +1,50 @@
 /**
- * Proves the content gate on real files: one good delivery and five broken
- * ones, built here with ffmpeg and ingested for real.
+ * Proves the content pipeline on real files: deliveries built here with
+ * ffmpeg and ingested for real.
  *
  *   node scripts/gate-proof.mjs [--keep]
  *
- * A check that has never failed is not a check (docs/standard.md). This run
- * breaks each rule on purpose — silent audio, a black opening, a horizontal
- * master, a missing caption file, the same master twice — and fails unless
- * the gate refuses each one FOR THE RIGHT REASON, and accepts the good one.
+ * A check that has never failed is not a check (docs/standard.md). This run:
  *
- * Nothing touches the repository: deliveries, published assets and manifests
- * all go to a temporary folder.
+ *   - breaks each rule on purpose — silent audio, a black opening, a
+ *     horizontal master, a landscape picture hiding behind a rotation flag, a
+ *     missing caption file, the same master twice, a territory the site cannot
+ *     restrict, a caption language outside the licence, an episode slug that
+ *     climbs out of its folder — and fails unless each is refused FOR THE
+ *     RIGHT REASON;
+ *   - delivers what real short drama looks like — a fade to black, an end
+ *     card, a freeze-frame cliffhanger, a vertical master stored sideways with
+ *     a rotation flag — and fails unless each is accepted;
+ *   - re-delivers over a published series and fails unless a refusal leaves
+ *     every published file and the manifest byte for byte as they were, a
+ *     re-run of an unchanged delivery changes nothing, the fixed delivery
+ *     resumes what already passed, and a corrected audio stream is re-judged.
+ *
+ * Nothing touches the repository: deliveries, published assets, the stage and
+ * manifests all go to a temporary folder.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const source = join(repoRoot, "content", "series", "signal-night");
 const keep = process.argv.includes("--keep");
 const work = mkdtempSync(join(tmpdir(), "flow-gate-proof-"));
+const SLUG = "proof-pack";
 
 function ffmpeg(args) {
   const result = spawnSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args], {
@@ -34,26 +57,128 @@ function ffmpeg(args) {
   }
 }
 
-/** A delivery with one episode, unless `episodes` says otherwise. */
-function delivery(name, { masters, episodes, captions = true }) {
-  const dir = join(work, name, "delivery", "proof-pack");
-  mkdirSync(join(dir, "masters"), { recursive: true });
-  mkdirSync(join(dir, "captions"), { recursive: true });
-  for (const [file, build] of Object.entries(masters)) build(join(dir, "masters", file));
-  if (captions) {
-    cpSync(
-      join(source, "captions", "episode-1.en.vtt"),
-      join(dir, "captions", "episode-1.en.vtt"),
-    );
-    cpSync(
-      join(source, "captions", "episode-1.en.vtt"),
-      join(dir, "captions", "episode-2.en.vtt"),
-    );
-  }
-  const series = {
+const goodMaster = join(source, "masters", "episode-1.mp4");
+const otherMaster = join(source, "masters", "episode-3.mp4");
+const goodCaptions = join(source, "captions", "episode-1.en.vtt");
+const X264 = ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac"];
+
+/** The good master, then two more seconds of `tail` with the music going on. */
+const withTail = (tail) => (target) =>
+  ffmpeg([
+    "-i",
+    goodMaster,
+    "-f",
+    "lavfi",
+    "-i",
+    `${tail}:s=720x1280:d=2:r=25`,
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=330:duration=2",
+    "-filter_complex",
+    "[0:v][0:a][1:v][2:a]concat=n=2:v=1:a=1[v][a]",
+    "-map",
+    "[v]",
+    "-map",
+    "[a]",
+    ...X264,
+    target,
+  ]);
+
+const masters = {
+  good: (target) => cpSync(goodMaster, target),
+  other: (target) => cpSync(otherMaster, target),
+  silentAudio: (target) =>
+    ffmpeg(["-i", goodMaster, "-af", "volume=0", "-c:v", "copy", "-c:a", "aac", target]),
+  blackOpening: (target) =>
+    ffmpeg([
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=black:s=720x1280:d=3:r=25",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=220:duration=3",
+      "-i",
+      goodMaster,
+      "-filter_complex",
+      "[0:v][1:a][2:v][2:a]concat=n=2:v=1:a=1[v][a]",
+      "-map",
+      "[v]",
+      "-map",
+      "[a]",
+      ...X264,
+      target,
+    ]),
+  horizontal: (target) =>
+    ffmpeg(["-i", goodMaster, "-vf", "scale=1280:720,setsar=1", ...X264.slice(0, 6), "-c:a", "copy", target]),
+  /** Vertical pixels, a flag that turns them landscape: the viewer sees 1280x720. */
+  landscapeBehindFlag: (target) =>
+    ffmpeg(["-display_rotation", "90", "-i", goodMaster, "-c", "copy", target]),
+  /** Landscape pixels, a flag that turns them vertical: the viewer sees 720x1280. */
+  verticalBehindFlag: (target) => {
+    const sideways = `${target}.sideways.mp4`;
+    ffmpeg(["-i", goodMaster, "-vf", "transpose=2", ...X264.slice(0, 6), "-c:a", "copy", sideways]);
+    ffmpeg(["-display_rotation", "-90", "-i", sideways, "-c", "copy", target]);
+    rmSync(sideways);
+  },
+  fadeToBlackEnding: withTail("color=c=black"),
+  endCardEnding: withTail("color=c=0x3040a0"),
+  freezeFrameEnding: (target) =>
+    ffmpeg([
+      "-i",
+      goodMaster,
+      "-vf",
+      "tpad=stop_mode=clone:stop_duration=2.5",
+      "-af",
+      "apad=pad_dur=2.5",
+      ...X264,
+      target,
+    ]),
+  /** A studio recut: one second shorter. */
+  recut: (target) => ffmpeg(["-i", otherMaster, "-t", "9", ...X264, target]),
+  /** Stream 0 is the dialogue bed, stream 1 a 1 kHz tone (the wrong stem). */
+  twoAudio: (target) =>
+    ffmpeg([
+      "-i",
+      goodMaster,
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=1000:duration=10",
+      "-map",
+      "0:v",
+      "-map",
+      "0:a",
+      "-map",
+      "1:a",
+      "-c:v",
+      "copy",
+      "-c:a",
+      "aac",
+      target,
+    ]),
+};
+
+function episode(number, extra = {}) {
+  return {
+    episodeNumber: number,
+    master: `masters/episode-${number}.mp4`,
+    title: `Proof ${number}`,
+    hook: "Gate proof.",
+    captions: [
+      { language: "en", file: `captions/episode-${number}.en.vtt`, kind: "captions", default: true },
+    ],
+    ...extra,
+  };
+}
+
+function seriesJson(episodes, extra = {}) {
+  return {
     schemaVersion: 1,
     seriesId: "series_proof",
-    seriesSlug: "proof-pack",
+    seriesSlug: SLUG,
     title: "Proof Pack",
     status: "published",
     defaultLocale: "en",
@@ -64,190 +189,338 @@ function delivery(name, { masters, episodes, captions = true }) {
     episodeDurationMs: { min: 8000, max: 20000 },
     genres: ["thriller"],
     tropes: ["night"],
-    rights: {
-      territories: ["WORLD"],
-      languages: ["en"],
-      windowStart: null,
-      windowEnd: null,
-    },
+    rights: { territories: ["WORLD"], languages: ["en"], windowStart: null, windowEnd: null },
     localizedMetadata: {
       en: { title: "Proof Pack", hook: "Gate proof.", description: "Gate proof." },
     },
-    episodes: episodes ?? [
-      {
-        episodeNumber: 1,
-        master: "masters/episode-1.mp4",
-        title: "Proof",
-        hook: "Gate proof.",
-        captions: [
-          {
-            language: "en",
-            file: "captions/episode-1.en.vtt",
-            kind: "captions",
-            default: true,
-          },
-        ],
-      },
-    ],
+    episodes,
+    ...extra,
   };
-  writeFileSync(join(dir, "series.json"), `${JSON.stringify(series, null, 2)}\n`);
-  return join(work, name, "delivery");
 }
 
-const goodMaster = join(source, "masters", "episode-1.mp4");
+/** One case = its own delivery, publish, stage and generated roots. */
+function caseRoots(name) {
+  const root = join(work, name);
+  const delivery = join(root, "delivery", SLUG);
+  mkdirSync(join(delivery, "masters"), { recursive: true });
+  mkdirSync(join(delivery, "captions"), { recursive: true });
+  return {
+    root,
+    delivery,
+    published: join(root, "published"),
+    generated: join(root, "generated"),
+    deliver({ masterBuilders, episodes, extra, captions = true }) {
+      for (const [number, build] of Object.entries(masterBuilders)) {
+        build(join(delivery, "masters", `episode-${number}.mp4`));
+      }
+      if (captions) {
+        for (const number of Object.keys(masterBuilders)) {
+          cpSync(goodCaptions, join(delivery, "captions", `episode-${number}.en.vtt`));
+        }
+      }
+      const list = episodes ?? Object.keys(masterBuilders).map((number) => episode(Number(number)));
+      writeFileSync(join(delivery, "series.json"), `${JSON.stringify(seriesJson(list, extra), null, 2)}\n`);
+    },
+    ingest() {
+      const result = spawnSync(
+        process.execPath,
+        [
+          join(repoRoot, "scripts", "ingest-series.mjs"),
+          SLUG,
+          "--delivery-root",
+          join(root, "delivery"),
+          "--publish-root",
+          join(root, "published"),
+          "--generated-root",
+          join(root, "generated"),
+        ],
+        { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
+      );
+      return { accepted: result.status === 0, output: `${result.stdout ?? ""}${result.stderr ?? ""}` };
+    },
+  };
+}
 
-const copyGood = (target) => cpSync(goodMaster, target);
-const silentAudio = (target) =>
-  ffmpeg(["-i", goodMaster, "-af", "volume=0", "-c:v", "copy", "-c:a", "aac", target]);
-const blackOpening = (target) =>
-  ffmpeg([
-    "-f",
-    "lavfi",
-    "-i",
-    "color=c=black:s=720x1280:d=3:r=25",
-    "-f",
-    "lavfi",
-    "-i",
-    "sine=frequency=220:duration=3",
-    "-i",
-    goodMaster,
-    "-filter_complex",
-    "[0:v][1:a][2:v][2:a]concat=n=2:v=1:a=1[v][a]",
-    "-map",
-    "[v]",
-    "-map",
-    "[a]",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-pix_fmt",
-    "yuv420p",
-    "-c:a",
-    "aac",
-    target,
-  ]);
-const horizontal = (target) =>
-  ffmpeg([
-    "-i",
-    goodMaster,
-    "-vf",
-    "scale=1280:720,setsar=1",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-pix_fmt",
-    "yuv420p",
-    "-c:a",
-    "copy",
-    target,
-  ]);
+/** Every published file and the generated manifest, by content. */
+function snapshot(roots) {
+  const out = new Map();
+  const walk = (dir, prefix) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      const rel = `${prefix}/${name}`;
+      if (statSync(path).isDirectory()) walk(path, rel);
+      else out.set(rel, createHash("sha256").update(readFileSync(path)).digest("hex"));
+    }
+  };
+  walk(roots.published, "published");
+  walk(roots.generated, "generated");
+  return out;
+}
 
-const cases = [
-  {
-    name: "good",
-    expect: "accepted",
-    root: () => delivery("good", { masters: { "episode-1.mp4": copyGood } }),
-  },
-  {
-    name: "silent audio",
-    expect: "refused",
-    reasons: ["silent_opening", "mostly_silent"],
-    root: () => delivery("silent", { masters: { "episode-1.mp4": silentAudio } }),
-  },
-  {
-    name: "black opening",
-    expect: "refused",
-    reasons: ["black_opening"],
-    root: () => delivery("black", { masters: { "episode-1.mp4": blackOpening } }),
-  },
-  {
-    name: "horizontal master",
-    expect: "refused",
-    reasons: ["not_vertical"],
-    root: () => delivery("horizontal", { masters: { "episode-1.mp4": horizontal } }),
-  },
-  {
-    name: "missing caption file",
-    expect: "refused",
-    reasons: ["missing_caption_file"],
-    root: () =>
-      delivery("nocaptions", { masters: { "episode-1.mp4": copyGood }, captions: false }),
-  },
-  {
-    name: "the same master twice",
-    expect: "refused",
-    reasons: ["duplicate_master"],
-    root: () =>
-      delivery("duplicate", {
-        masters: { "episode-1.mp4": copyGood, "episode-2.mp4": copyGood },
-        episodes: [1, 2].map((number) => ({
-          episodeNumber: number,
-          master: `masters/episode-${number}.mp4`,
-          title: `Proof ${number}`,
-          hook: "Gate proof.",
-          captions: [
-            {
-              language: "en",
-              file: `captions/episode-${number}.en.vtt`,
-              kind: "captions",
-              default: true,
-            },
-          ],
-        })),
-      }),
-  },
-];
+function sameSnapshot(before, after) {
+  const changed = [];
+  for (const [rel, hash] of before) if (after.get(rel) !== hash) changed.push(rel);
+  for (const rel of after.keys()) if (!before.has(rel)) changed.push(`${rel} (new)`);
+  return changed;
+}
 
 const results = [];
-for (const entry of cases) {
-  const deliveryRoot = entry.root();
-  const caseDir = resolve(deliveryRoot, "..");
-  const run = spawnSync(
-    process.execPath,
-    [
-      join(repoRoot, "scripts", "ingest-series.mjs"),
-      "proof-pack",
-      "--delivery-root",
-      deliveryRoot,
-      "--publish-root",
-      join(caseDir, "published"),
-      "--generated-root",
-      join(caseDir, "generated"),
-    ],
-    { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
+function record(name, ok, detail, output = "") {
+  results.push({ name, ok, detail, output });
+}
+
+/** A single delivery that must be refused, naming one of `reasons`. */
+function refusal(name, build, reasons) {
+  const roots = caseRoots(name.replace(/[^a-z0-9]+/gi, "-").toLowerCase());
+  build(roots);
+  const run = roots.ingest();
+  const found = reasons.filter((reason) => run.output.includes(reason));
+  const published = existsSync(join(roots.published, SLUG));
+  record(
+    name,
+    !run.accepted && found.length > 0 && !published,
+    run.accepted
+      ? "ACCEPTED, should be refused"
+      : `REFUSED (${found.join(", ") || "for another reason"})${published ? ", but files were published" : ""}`,
+    run.output,
   );
-  const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
-  const accepted = run.status === 0;
-  const reasons = (entry.reasons ?? []).filter((reason) => output.includes(`[${reason}]`));
-  const wanted = entry.expect === "accepted";
-  const ok = accepted === wanted && (wanted || reasons.length > 0);
-  results.push({ name: entry.name, accepted, reasons, ok, output });
+}
+
+/** A single delivery that must be accepted; `check` inspects what it produced. */
+function acceptance(name, build, check = () => null) {
+  const roots = caseRoots(name.replace(/[^a-z0-9]+/gi, "-").toLowerCase());
+  build(roots);
+  const run = roots.ingest();
+  const problem = run.accepted ? check(roots, run.output) : "REFUSED, should be accepted";
+  record(name, problem === null, problem ?? "ACCEPTED", run.output);
+}
+
+// --- refused, for the right reason -----------------------------------------
+
+refusal("silent audio", (r) => r.deliver({ masterBuilders: { 1: masters.silentAudio } }), [
+  "[silent_opening]",
+  "[mostly_silent]",
+]);
+refusal("black opening", (r) => r.deliver({ masterBuilders: { 1: masters.blackOpening } }), [
+  "[black_opening]",
+]);
+refusal("horizontal master", (r) => r.deliver({ masterBuilders: { 1: masters.horizontal } }), [
+  "[not_vertical]",
+]);
+refusal(
+  "landscape picture behind a rotation flag",
+  (r) => r.deliver({ masterBuilders: { 1: masters.landscapeBehindFlag } }),
+  ["[not_vertical] 1280x720"],
+);
+refusal(
+  "missing caption file",
+  (r) => r.deliver({ masterBuilders: { 1: masters.good }, captions: false }),
+  ["[missing_caption_file]"],
+);
+refusal(
+  "the same master twice",
+  (r) => r.deliver({ masterBuilders: { 1: masters.good, 2: masters.good } }),
+  ["[duplicate_master]"],
+);
+refusal(
+  "a territory the site cannot restrict",
+  (r) =>
+    r.deliver({
+      masterBuilders: { 1: masters.good },
+      extra: { rights: { territories: ["US"], languages: ["en"], windowStart: null, windowEnd: null } },
+    }),
+  ["rights.territories is"],
+);
+refusal(
+  "a caption language outside the licence",
+  (r) =>
+    r.deliver({
+      masterBuilders: { 1: masters.good },
+      episodes: [
+        episode(1, {
+          captions: [
+            { language: "en", file: "captions/episode-1.en.vtt", kind: "captions", default: true },
+            { language: "fr", file: "captions/episode-1.en.vtt", kind: "subtitles", default: false },
+          ],
+        }),
+      ],
+    }),
+  ["[caption_language_not_licensed]"],
+);
+refusal(
+  "an episode slug that leaves its folder",
+  (r) =>
+    r.deliver({ masterBuilders: { 1: masters.good }, episodes: [episode(1, { episodeSlug: ".." })] }),
+  ["[bad_episode_slug]"],
+);
+
+// --- accepted: what real short drama looks like ----------------------------
+
+const hasPoster = (roots) =>
+  existsSync(join(roots.published, SLUG, "posters", "episode-1.webp")) &&
+  existsSync(join(roots.published, SLUG, "share", "episode-1.jpg"))
+    ? null
+    : "no poster or share card was published";
+
+acceptance("good", (r) => r.deliver({ masterBuilders: { 1: masters.good } }), (roots) => {
+  const manifest = readFileSync(join(roots.generated, `${SLUG}.ts`), "utf8");
+  if (!manifest.includes("shareCardReference") || !manifest.includes(".webp")) {
+    return "the manifest names no share card or no WebP poster";
+  }
+  return hasPoster(roots);
+});
+/** Accepted BECAUSE of the rule, not because the still went unnoticed. */
+const stillSeenAndAccepted = (roots) => {
+  const path = join(roots.published, SLUG, "hls", "episode-1", "manifest.json");
+  const stills = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")).picture?.freezeRanges : 0;
+  if (!(stills >= 1)) return "the still ending was never detected, so the rule was not exercised";
+  return hasPoster(roots);
+};
+acceptance(
+  "a fade to black ending",
+  (r) => r.deliver({ masterBuilders: { 1: masters.fadeToBlackEnding } }),
+  stillSeenAndAccepted,
+);
+acceptance(
+  "an end card ending",
+  (r) => r.deliver({ masterBuilders: { 1: masters.endCardEnding } }),
+  stillSeenAndAccepted,
+);
+acceptance(
+  "a freeze-frame cliffhanger",
+  (r) => r.deliver({ masterBuilders: { 1: masters.freezeFrameEnding } }),
+  stillSeenAndAccepted,
+);
+acceptance(
+  "a vertical master stored sideways with a rotation flag",
+  (r) => r.deliver({ masterBuilders: { 1: masters.verticalBehindFlag } }),
+  (roots) => {
+    const playlist = readFileSync(join(roots.published, SLUG, "hls", "episode-1", "master.m3u8"), "utf8");
+    const sizes = [...playlist.matchAll(/RESOLUTION=(\d+)x(\d+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+    if (sizes.length === 0 || sizes.some(([w, h]) => w >= h)) {
+      return `renditions are not vertical: ${sizes.map((s) => s.join("x")).join(", ")}`;
+    }
+    const manifest = readFileSync(join(roots.generated, `${SLUG}.ts`), "utf8");
+    if (!/"width": 720,\s*"height": 1280/.test(manifest)) return "the manifest does not record 720x1280";
+    return null;
+  },
+);
+
+// --- a published series survives a bad re-delivery -------------------------
+{
+  const name = "a refused re-delivery changes nothing published";
+  const roots = caseRoots("redelivery");
+  roots.deliver({ masterBuilders: { 1: masters.good, 2: masters.other } });
+  const first = roots.ingest();
+  if (!first.accepted) {
+    record(name, false, "the first, good delivery was refused", first.output);
+  } else {
+    const before = snapshot(roots);
+
+    // The studio re-delivers: episode 1 is a new valid master, episode 2 is a
+    // recut whose subtitles were cut off halfway.
+    masters.recut(join(roots.delivery, "masters", "episode-1.mp4"));
+    ffmpeg(["-i", goodMaster, "-t", "9.5", ...X264, join(roots.delivery, "masters", "episode-2.mp4")]);
+    writeFileSync(
+      join(roots.delivery, "captions", "episode-2.en.vtt"),
+      "WEBVTT\n\n00:00:00.500 --> 00:00:02.500\nSomething is wrong.\n\n00:00:03.000 --> 00:00:04.500\nDo not answer.\n",
+    );
+    const refused = roots.ingest();
+    const changedByRefusal = sameSnapshot(before, snapshot(roots));
+
+    // A numbering typo: episode 2 declared as episode 1 again.
+    const deliveryFile = join(roots.delivery, "series.json");
+    const fixedJson = readFileSync(deliveryFile, "utf8");
+    const typo = JSON.parse(fixedJson);
+    typo.episodes[1].episodeNumber = 1;
+    writeFileSync(deliveryFile, JSON.stringify(typo, null, 2));
+    const typoRun = roots.ingest();
+    const changedByTypo = sameSnapshot(before, snapshot(roots));
+    writeFileSync(deliveryFile, fixedJson);
+
+    const problems = [];
+    if (refused.accepted || !refused.output.includes("[stops_too_early]")) {
+      problems.push("the truncated subtitles were not refused");
+    }
+    if (typoRun.accepted || !typoRun.output.includes("[duplicate_episode_number]")) {
+      problems.push("the numbering typo was not refused");
+    }
+    if (changedByRefusal.length > 0) {
+      problems.push(`the refusal changed ${changedByRefusal.length} published file(s): ${changedByRefusal.slice(0, 4).join(", ")}`);
+    }
+    if (changedByTypo.length > 0) {
+      problems.push(`the typo changed ${changedByTypo.length} published file(s): ${changedByTypo.slice(0, 4).join(", ")}`);
+    }
+    record(
+      name,
+      problems.length === 0,
+      problems.join("; ") || `both refused; ${before.size} published files byte-identical`,
+      `${refused.output}\n${typoRun.output}`,
+    );
+
+    // The fixed delivery resumes the renditions that already passed.
+    cpSync(goodCaptions, join(roots.delivery, "captions", "episode-2.en.vtt"));
+    const fixed = roots.ingest();
+    const resumed = /resumed from the stage: (\d+)/.exec(fixed.output)?.[1];
+    record(
+      "the fixed delivery resumes what already passed",
+      fixed.accepted && resumed === "2" && /packaged now: 0/.test(fixed.output),
+      fixed.accepted ? `packaged now 0, resumed ${resumed ?? "?"}` : "the fixed delivery was refused",
+      fixed.output,
+    );
+
+    // The same delivery again: nothing is encoded, nothing published changes.
+    const settled = snapshot(roots);
+    const again = roots.ingest();
+    const changedByRerun = sameSnapshot(settled, snapshot(roots));
+    record(
+      "an unchanged delivery changes nothing",
+      again.accepted && /packaged now: 0/.test(again.output) && changedByRerun.length === 0,
+      again.accepted
+        ? `packaged now ${/packaged now: (\d+)/.exec(again.output)?.[1]}, ${changedByRerun.length} file(s) changed`
+        : "refused",
+      again.output,
+    );
+  }
+}
+
+// --- a corrected gate option is judged again -------------------------------
+{
+  const name = "a corrected audio stream is re-encoded";
+  const roots = caseRoots("audio-stream");
+  roots.deliver({
+    masterBuilders: { 1: masters.twoAudio },
+    episodes: [episode(1, { audioStream: 1 })],
+  });
+  const wrong = roots.ingest();
+  const deliveryFile = join(roots.delivery, "series.json");
+  const corrected = JSON.parse(readFileSync(deliveryFile, "utf8"));
+  corrected.episodes[0].audioStream = 0;
+  writeFileSync(deliveryFile, JSON.stringify(corrected, null, 2));
+  const right = roots.ingest();
+  const recordPath = join(roots.published, SLUG, "hls", "episode-1", "manifest.json");
+  const stream = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, "utf8")).audioStream : null;
+  record(
+    name,
+    wrong.accepted && right.accepted && /packaged now: 1/.test(right.output) && stream === 0,
+    `second run ${/packaged now: (\d+)/.exec(right.output)?.[0] ?? "refused"}, published audioStream ${stream}`,
+    `${wrong.output}\n${right.output}`,
+  );
 }
 
 console.error("\ngate-proof: one delivery per rule\n");
 for (const result of results) {
-  const verdict = result.accepted ? "ACCEPTED" : "REFUSED ";
-  const why = result.reasons.length > 0 ? ` (${result.reasons.join(", ")})` : "";
-  console.error(`  ${result.ok ? "ok  " : "FAIL"}  ${verdict}  ${result.name}${why}`);
+  console.error(`  ${result.ok ? "ok  " : "FAIL"}  ${result.name} — ${result.detail}`);
 }
 
 const failed = results.filter((result) => !result.ok);
 if (failed.length > 0) {
   for (const result of failed) {
-    console.error(`\n--- ${result.name} ---\n${result.output.slice(-2500)}`);
+    console.error(`\n--- ${result.name} ---\n${result.output.slice(-3000)}`);
   }
   console.error(`\ngate-proof: ${failed.length} case(s) did not behave as declared`);
   if (!keep) rmSync(work, { recursive: true, force: true });
-  process.exit(1);
-}
-
-// The good delivery must also have produced the files it promises.
-const generated = join(work, "good", "generated", "proof-pack.ts");
-const manifest = readFileSync(generated, "utf8");
-if (!manifest.includes("shareCardReference") || !manifest.includes(".webp")) {
-  console.error("gate-proof: the accepted delivery produced no share card or no WebP poster");
   process.exit(1);
 }
 

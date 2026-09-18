@@ -9,7 +9,7 @@
  * not proof of a correct artifact.
  */
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -136,7 +136,31 @@ function checkCatalogAssets(feedCatalog) {
   console.error(`deploy-checks: ${checked} catalog assets resolved in the export`);
 }
 
+/**
+ * Each packaged episode keeps a record next to its renditions (manifest.json:
+ * the master's file name and hash, the ffmpeg build, the gate options). Ingest
+ * needs it to resume; a viewer does not, so it never leaves in the export.
+ */
+function stripPackagingRecords() {
+  const seriesRoot = join(exportDir, "content", "series");
+  if (!existsSync(seriesRoot)) return;
+  let removed = 0;
+  for (const series of readdirSync(seriesRoot)) {
+    const hls = join(seriesRoot, series, "hls");
+    if (!existsSync(hls)) continue;
+    for (const episode of readdirSync(hls)) {
+      const record = join(hls, episode, "manifest.json");
+      if (existsSync(record)) {
+        rmSync(record);
+        removed += 1;
+      }
+    }
+  }
+  console.error(`deploy-checks: ${removed} packaging records kept out of the export`);
+}
+
 function checkExport() {
+  stripPackagingRecords();
   const site = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") ?? "";
   if (!site) failures.push("NEXT_PUBLIC_SITE_URL is not set: cannot verify preview URLs");
 
@@ -195,7 +219,12 @@ function checkExport() {
   // swipe past the second episode.
   let feedCatalog = null;
   try {
-    feedCatalog = JSON.parse(readFileSync(join(exportDir, "catalog/feed.json"), "utf8"));
+    const text = readFileSync(join(exportDir, "catalog/feed.json"), "utf8");
+    feedCatalog = JSON.parse(text);
+    // Licence terms and the producer of record stay on the build side.
+    for (const field of ["producerId", "territories", "socialClipsAllowed"]) {
+      if (text.includes(`"${field}"`)) failures.push(`catalog/feed.json carries "${field}"`);
+    }
   } catch {
     failures.push("export has no readable catalog/feed.json");
   }

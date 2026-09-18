@@ -17,17 +17,32 @@ import {
   checkPublishedLoudness,
   checkSilence,
   chooseAudioStream,
+  displayDimensions,
   parseDetections,
   parseEbur128Summary,
   parseLoudnormJson,
 } from "../scripts/lib/media-gate.mjs";
 import {
+  captionNotes,
   captionSummary,
   checkCaptionTrack,
+  isLanguageTag,
+  isLicensedLanguage,
   parseTimestamp,
   parseVttCues,
   srtToVtt,
 } from "../scripts/lib/vtt.mjs";
+import {
+  checkCaptionLicence,
+  checkEpisodeNumbers,
+  checkEpisodeSlugs,
+  checkRights,
+  gateOptionsFor,
+  isInside,
+  isPackageCurrent,
+  isSlug,
+  packageFlags,
+} from "../scripts/lib/delivery-rules.mjs";
 
 const codes = (issues: Array<{ code: string }>) => issues.map((issue) => issue.code);
 
@@ -104,7 +119,9 @@ describe("reading what ffmpeg measured", () => {
   it("a freeze still running at the end of the file has no duration line", () => {
     const detections = parseDetections("lavfi.freezedetect.freeze_start: 7.0");
     expect(detections.freeze).toEqual([{ start: 7, duration: null }]);
-    expect(codes(checkPicture(detections, 10_000))).toEqual(["frozen_picture"]);
+    // Measured to the end of the file: 3 s is an end card, 13 s is a frozen master.
+    expect(checkPicture(detections, 10_000)).toEqual([]);
+    expect(codes(checkPicture(detections, 20_000))).toEqual(["frozen_picture"]);
   });
 });
 
@@ -150,6 +167,163 @@ describe("the shape of a delivered master", () => {
 
   it("refuses a frame rate no phone shot", () => {
     expect(codes(checkMasterShape({ ...good, fps: 12 }))).toContain("unusual_fps");
+  });
+});
+
+describe("the picture as the viewer sees it", () => {
+  it("applies a rotation flag before the shape is judged", () => {
+    // ffprobe 8 on a vertical picture stored sideways (-display_rotation -90).
+    const sideways = { width: 1280, height: 720, side_data_list: [{ rotation: -90 }] };
+    expect(displayDimensions(sideways)).toEqual({ width: 720, height: 1280, rotation: 270 });
+    expect(
+      checkMasterShape(
+        { ...displayDimensions(sideways), fps: 25, durationMs: 60_000 },
+        { allowBelow1080p: true },
+      ),
+    ).toEqual([]);
+  });
+
+  it("a landscape picture stored as vertical pixels is refused", () => {
+    const flagged = { width: 720, height: 1280, side_data_list: [{ rotation: 90 }] };
+    const shown = displayDimensions(flagged);
+    expect(shown).toEqual({ width: 1280, height: 720, rotation: 90 });
+    expect(
+      codes(checkMasterShape({ ...shown, fps: 25, durationMs: 60_000 }, { allowBelow1080p: true })),
+    ).toEqual(["not_vertical"]);
+  });
+
+  it("reads the old rotate tag, and leaves an unrotated or upside-down picture alone", () => {
+    expect(displayDimensions({ width: 1920, height: 1080, tags: { rotate: "90" } })).toEqual({
+      width: 1080,
+      height: 1920,
+      rotation: 90,
+    });
+    expect(displayDimensions({ width: 1080, height: 1920 })).toEqual({
+      width: 1080,
+      height: 1920,
+      rotation: 0,
+    });
+    expect(displayDimensions({ width: 1080, height: 1920, side_data_list: [{ rotation: 180 }] })).toEqual(
+      { width: 1080, height: 1920, rotation: 180 },
+    );
+  });
+});
+
+describe("the delivery file", () => {
+  it("slugs are URL segments and folder names, nothing else", () => {
+    for (const good of ["episode-1", "ep1", "the-last-call-2"]) expect(isSlug(good)).toBe(true);
+    for (const bad of ["..", "../..", "a/b", "a\\b", "Episode-1", "ep--1", "-ep", "", "ep 1"]) {
+      expect(isSlug(bad)).toBe(false);
+    }
+  });
+
+  it("refuses an episode slug that leaves its folder, and two episodes sharing one", () => {
+    expect(codes(checkEpisodeSlugs([{ episodeNumber: 1, episodeSlug: ".." }]))).toEqual([
+      "bad_episode_slug",
+    ]);
+    expect(
+      codes(
+        checkEpisodeSlugs([
+          { episodeNumber: 1, episodeSlug: "pilot" },
+          { episodeNumber: 2, episodeSlug: "pilot" },
+        ]),
+      ),
+    ).toEqual(["duplicate_episode_slug"]);
+    expect(checkEpisodeSlugs([{ episodeNumber: 1 }, { episodeNumber: 2 }])).toEqual([]);
+  });
+
+  it("keeps a path inside its folder", () => {
+    expect(isInside("/pub/series", "/pub/series/show/hls/episode-1")).toBe(true);
+    expect(isInside("/pub/series/show/hls", "/pub/series/show/hls/..")).toBe(false);
+    expect(isInside("/pub/series/show/hls", "/pub/series/show/hls")).toBe(false);
+    expect(isInside("/pub/series", "/pub/series-other/x")).toBe(false);
+  });
+
+  it("episode numbers must run 1..N", () => {
+    expect(checkEpisodeNumbers([{ episodeNumber: 1 }, { episodeNumber: 2 }])).toEqual([]);
+    expect(
+      codes(checkEpisodeNumbers([{ episodeNumber: 1 }, { episodeNumber: 2 }, { episodeNumber: 2 }, { episodeNumber: 4 }])),
+    ).toEqual(["duplicate_episode_number", "episode_gap"]);
+  });
+});
+
+describe("rights the site can honour (F8)", () => {
+  const base = {
+    defaultLocale: "en",
+    rights: { territories: ["WORLD"], languages: ["en", "es"], windowStart: null, windowEnd: null },
+  };
+
+  it("accepts a worldwide licence in the language the episodes are spoken in", () => {
+    expect(checkRights(base)).toEqual([]);
+  });
+
+  it("refuses a territory limit: the export is served everywhere", () => {
+    const usOnly = { ...base, rights: { ...base.rights, territories: ["US"] } };
+    expect(checkRights(usOnly)[0]).toContain("cannot restrict by country");
+    const mixed = { ...base, rights: { ...base.rights, territories: ["WORLD", "US"] } };
+    expect(checkRights(mixed)).toHaveLength(1);
+  });
+
+  it("refuses episodes spoken in a language the licence does not cover", () => {
+    expect(checkRights({ ...base, defaultLocale: "fr" })[0]).toContain("defaultLocale");
+  });
+
+  it("refuses a caption language outside the licence; a regional tag is covered", () => {
+    expect(codes(checkCaptionLicence("fr", base.rights))).toEqual(["caption_language_not_licensed"]);
+    expect(checkCaptionLicence("es-419", base.rights)).toEqual([]);
+    expect(isLicensedLanguage("en", ["en-US"])).toBe(false);
+    expect(isLicensedLanguage("fil", ["fil"])).toBe(true);
+  });
+});
+
+describe("resuming a packaged episode", () => {
+  const delivery = { allowBelow1080p: true, episodeDurationMs: { min: 8000, max: 20000 } };
+  const options = gateOptionsFor(delivery, { audioStream: 1 });
+  const record = { sourceSha256: "abc", gateVersion: 3, gateOptions: { ...options } };
+  const expected = { sourceSha256: "abc", gateVersion: 3, gateOptions: options };
+
+  it("records the options as the flags the gate runs with", () => {
+    expect(options).toEqual({
+      allowBelow1080p: true,
+      audioStream: 1,
+      durationMinMs: 8000,
+      durationMaxMs: 20000,
+    });
+    expect(packageFlags(options)).toEqual([
+      "--allow-below-1080p",
+      "--duration-min-ms",
+      "8000",
+      "--duration-max-ms",
+      "20000",
+      "--audio-stream",
+      "1",
+    ]);
+    expect(packageFlags(gateOptionsFor({}, {}))).toEqual([]);
+  });
+
+  it("reuses only a package judged with the same master, rules and options", () => {
+    expect(isPackageCurrent(record, expected)).toBe(true);
+    expect(isPackageCurrent({ ...record, sourceSha256: "other" }, expected)).toBe(false);
+    expect(isPackageCurrent({ ...record, gateVersion: 2 }, expected)).toBe(false);
+  });
+
+  it("a corrected audio stream, length range or resolution exception is judged again", () => {
+    for (const change of [
+      { audioStream: 0 },
+      { durationMaxMs: 15000 },
+      { durationMinMs: null },
+      { allowBelow1080p: false },
+    ]) {
+      expect(
+        isPackageCurrent(record, { ...expected, gateOptions: { ...options, ...change } }),
+      ).toBe(false);
+    }
+  });
+
+  it("a package recorded before options were recorded is not current", () => {
+    const { gateOptions: _ignored, ...old } = record;
+    expect(isPackageCurrent(old, expected)).toBe(false);
+    expect(isPackageCurrent(null, expected)).toBe(false);
   });
 });
 
@@ -200,6 +374,33 @@ describe("black, frozen and silent", () => {
         90_000,
       ),
     ).toEqual([]);
+  });
+
+  it("refuses a still picture in the opening: the hook does not move", () => {
+    const opening = { black: [], freeze: [{ start: 0.5, duration: 2 }], silence: [] };
+    expect(codes(checkPicture(opening, 90_000))).toEqual(["frozen_opening"]);
+    // A still that only grazes the opening is a shot that ends there.
+    const grazing = { black: [], freeze: [{ start: 4, duration: 3 }], silence: [] };
+    expect(checkPicture(grazing, 90_000)).toEqual([]);
+  });
+
+  it("accepts the endings short drama is made of: fade, end card, freeze-frame", () => {
+    // Real freezedetect output for the proof deliveries: a 2 s still that runs
+    // to the end of the file has no duration line.
+    for (const tail of [
+      { start: 88, duration: 2 },
+      { start: 85, duration: null },
+      { start: 60, duration: 6 },
+    ]) {
+      expect(checkPicture({ black: [], freeze: [tail], silence: [] }, 90_000)).toEqual([]);
+    }
+  });
+
+  it("refuses a still longer than any shot: the master froze", () => {
+    const frozen = { black: [], freeze: [{ start: 30, duration: 12 }], silence: [] };
+    expect(codes(checkPicture(frozen, 90_000))).toEqual(["frozen_picture"]);
+    const toTheEnd = { black: [], freeze: [{ start: 70, duration: null }], silence: [] };
+    expect(codes(checkPicture(toTheEnd, 90_000))).toEqual(["frozen_picture"]);
   });
 
   it("refuses a silent opening and an episode that is mostly silence", () => {
@@ -328,6 +529,16 @@ describe("subtitles", () => {
     ).toEqual(["missing_language"]);
   });
 
+  it("accepts 3-letter languages: Filipino, Cantonese, Hawaiian", () => {
+    for (const tag of ["fil", "yue", "haw", "pt-BR", "zh-Hant", "es-419"]) {
+      expect(isLanguageTag(tag)).toBe(true);
+      expect(checkCaptionTrack(parseVttCues(vtt), { durationMs: 10_000, language: tag })).toEqual(
+        [],
+      );
+    }
+    for (const tag of ["English", "e", "engl", "EN", "en_US", ""]) expect(isLanguageTag(tag)).toBe(false);
+  });
+
   it("refuses cues that drift past the end of the episode", () => {
     // The classic 25 → 23.976 fps conversion: everything 4% late.
     const drifted = vtt.replace("00:00:06.000 --> 00:00:07.800", "00:00:11.000 --> 00:00:13.400");
@@ -361,5 +572,55 @@ describe("subtitles", () => {
     expect(parsed.errors).toEqual([]);
     expect(parsed.cues.map((cue) => cue.text)).toEqual(["Line one.", "Line two."]);
     expect(checkCaptionTrack(parsed, { durationMs: 10_000, language: "en" })).toEqual([]);
+  });
+
+  it("keeps a line of dialogue that is only a number", () => {
+    const srt = [
+      "1",
+      "00:00:00,500 --> 00:00:02,500",
+      "How many were there?",
+      "",
+      "2",
+      "00:00:03,000 --> 00:00:05,500",
+      "47",
+      "",
+      "3",
+      "00:00:06,000 --> 00:00:08,000",
+      "Room",
+      "12",
+      "",
+    ].join("\n");
+    const parsed = parseVttCues(srtToVtt(srt));
+    expect(parsed.cues.map((cue) => cue.text)).toEqual(["How many were there?", "47", "Room 12"]);
+    expect(checkCaptionTrack(parsed, { durationMs: 10_000, language: "en" })).toEqual([]);
+  });
+
+  it("refuses a file cut off after half the episode", () => {
+    // The review's delivery: cues stop at 5.5 s of a 10 s episode.
+    const half = [
+      "WEBVTT",
+      "",
+      "00:00:00.500 --> 00:00:02.500",
+      "Something is wrong.",
+      "",
+      "00:00:03.000 --> 00:00:05.500",
+      "Do not answer.",
+      "",
+    ].join("\n");
+    expect(
+      codes(checkCaptionTrack(parseVttCues(half), { durationMs: 10_000, language: "en" })),
+    ).toContain("stops_too_early");
+  });
+
+  it("names a long quiet tail without refusing it", () => {
+    // Last cue at 60 s of 90 s: passes (two thirds), but 30 s with no text is worth a look.
+    const quiet = ["WEBVTT", "", "00:00:01.000 --> 00:01:00.000", "x", ""].join("\n");
+    const parsed = parseVttCues(quiet);
+    expect(codes(checkCaptionTrack(parsed, { durationMs: 90_000, language: "en" }))).not.toContain(
+      "stops_too_early",
+    );
+    expect(codes(captionNotes(parsed, 90_000))).toEqual(["quiet_tail"]);
+    // A two-second sting after the last line on a short episode is not worth a word.
+    expect(captionNotes(parseVttCues(vtt), 10_000)).toEqual([]);
   });
 });

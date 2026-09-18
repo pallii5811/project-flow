@@ -16,7 +16,7 @@ episodes free, then paywall with coins or subscriptions of up to $19.99 a week.
 | A shared link opens the exact episode, with a correct preview card              | Holds: absolute preview URLs; `npm run export:web` refuses an export pointing elsewhere (proven on a localhost build). Since 2026-09-18 the card is the landscape 1200×630 image ingest builds from the episode frame, declared with width, height and alt, instead of the 9:16 poster crawlers cut to a band; the export check refuses a page whose preview is not landscape. Real crawler rendering (X, WhatsApp) is not tested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Contextual ads only, no personal profiling                                      | Holds by design                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Picture adapts to the network; nothing downloaded beyond current + next episode | Holds on the stand-in pack: HLS, 2 s segments; at a cold open the next episode fetches only its first 4 s and nothing beyond it is fetched (`npm run e2e:web`). At open only 3 posters are fetched and at most 5 slides hold a poster or a player, whatever the catalog size (`npm run e2e:web:scale`). Safari's native path is not tested yet                                                                                                                                                                                                                                                                                                                                                   |
-| Subtitles in the viewer's language                                              | Partial: English, and Spanish on one episode. Drawn by the app above the title block, on by default while muted, and an explicit choice is remembered (`npm run e2e:web`); 8.0:1 contrast over a white frame, pinned by a test on the shipped CSS. Since 2026-09-18 a track is marked ready only if its file parses, its cues fit the measured duration (no drift past the end, no stop before half the episode, at least 30% covered) and it is on disk in the export; `npm run export:web` refuses an export whose catalog promises a caption file that is not there. Real phones and Safari not tested yet                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Subtitles in the viewer's language                                              | Partial: English, and Spanish on one episode. Drawn by the app above the title block, on by default while muted, and an explicit choice is remembered (`npm run e2e:web`); 8.0:1 contrast over a white frame, pinned by a test on the shipped CSS. Since 2026-09-18 a track is marked ready only if its file parses, its cues fit the measured duration (no drift past the end, no stop before 60% of the episode, at least 30% covered) and its language is one the licence covers and it is on disk in the export; `npm run export:web` refuses an export whose catalog promises a caption file that is not there. Real phones and Safari not tested yet                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Reasons to return tomorrow (follow survives reload, new-episode alerts)         | **Partial.** The place in a story survives reload, one per series (a shared link into another series keeps it), and a viewer who finished an episode reopens on the next one (`npm run e2e:web`). Like and follow live in memory only; no new-episode alerts                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Usable with a keyboard, a screen reader and a phone on its side                 | Partial. In headless Chrome (`npm run e2e:web`): Space on a focused button presses it; the Tune sheet traps focus, closes on Escape and gives focus back; an episode change is announced politely and focus follows it; rail toggles keep one name with `aria-pressed`; a 740×360 phone gets the uncropped 9:16 frame and no page scroll; every rail icon keeps 3:1 over a white frame. Contrast of the sheet title, episode position and playback error is pinned by `a11y.test.ts`. VoiceOver, TalkBack and real notched phones not tested yet                                                                                                                                                 |
 | An episode never freezes on its poster                                          | Holds in headless Chrome: a network drop while the next episode warms recovers when the network is back; an episode that cannot load shows why for 2.5 s, then moves on; a playlist answering 503 four times plays after the player's own retries (6.5–7.8 s over two runs); a network that answers nothing shows the error after the watchdog (20 s), skips two episodes, then stops on "Connection problem" instead of running through the feed; sound refused without a gesture plays muted (`npm run e2e:web`). The watchdog re-attach, the retry timers and the muted fallback are each driven in the browser. Real phones, Safari's native player and flaky mobile networks not tested yet |
@@ -142,21 +142,49 @@ different pack:
 | Episode durations                         | one constant, 10 000 ms, for every episode | measured per episode by ffmpeg |
 | Ingest of an unchanged pack               | —                            | 3.5 s (0 re-encoded) against 50.7 s cold  |
 
-The gate was proven by breaking it on purpose (`node scripts/gate-proof.mjs`, six real
-deliveries built with ffmpeg, 23 s):
+The gate is proven by breaking it on purpose (`npm run proof:gate`, 18 real deliveries
+built with ffmpeg and ingested for real, about 2 minutes; it runs in CI after the unit
+tests). Since the review of 2026-09-18 it also proves what a refusal must NOT do:
 
-| Delivery               | Verdict  | Reason the gate gave                      |
-| ---------------------- | -------- | ------------------------------------------ |
-| the pack as delivered  | accepted | —                                          |
-| silent audio           | refused  | `silent_opening`, `mostly_silent`          |
-| 3 s of black at the top | refused | `black_opening`                            |
-| 1280×720 master        | refused  | `not_vertical`                             |
-| caption file missing   | refused  | `missing_caption_file`                     |
-| same master twice      | refused  | `duplicate_master`                         |
+| Delivery                                              | Verdict  | Reason, or what is proven                                 |
+| ----------------------------------------------------- | -------- | --------------------------------------------------------- |
+| the pack as delivered                                 | accepted | —                                                         |
+| silent audio                                          | refused  | `silent_opening`, `mostly_silent`                         |
+| 3 s of black at the top                               | refused  | `black_opening`                                           |
+| 1280×720 master                                       | refused  | `not_vertical`                                            |
+| vertical pixels with a rotation flag that shows them landscape | refused | `not_vertical` 1280x720 (was accepted, and shipped landscape renditions) |
+| caption file missing                                  | refused  | `missing_caption_file`                                    |
+| same master twice                                     | refused  | `duplicate_master`                                        |
+| territories `["US"]`                                  | refused  | the site cannot restrict by country (was accepted and shown worldwide) |
+| a `fr` caption on an `en`-only licence                | refused  | `caption_language_not_licensed` (was published)           |
+| `episodeSlug: ".."`                                   | refused  | `bad_episode_slug` (was: the series folder wiped)         |
+| a fade to black, an end card, a freeze-frame ending   | accepted | the still is detected and allowed (all three were refused `frozen_picture`) |
+| a vertical master stored sideways with a rotation flag | accepted | renditions and manifest 720×1280 (was refused)           |
+| a re-delivery with a recut and cut-off subtitles, then a numbering typo | refused | **all 54 published files and the manifest byte-identical** (the recut used to overwrite the live HLS, poster and card) |
+| the fixed re-delivery                                 | accepted | 0 re-encoded, 2 resumed from the stage                    |
+| the same delivery again                               | accepted | 0 re-encoded, 0 files changed                             |
+| `audioStream` corrected from 1 to 0                   | accepted | re-encoded with stream 0 (the wrong stem used to stay live) |
+
+The rollback cases were themselves proven to fail: an ingest sabotaged to publish its stage
+on a refusal turned 9 of the 18 cases red.
+
+The same run on the real stand-in pack (`node scripts/ingest-series.mjs`, 2026-09-18) found
+a defect nobody had seen: the Spanish subtitles of episode 1 stopped at 5.5 s of 10 s, one
+line short. The tightened tail rule refused the series and **nothing published changed**
+(`git status` clean under `apps/web/public`); with the line restored the next run resumed
+all five episodes from the stage instead of re-encoding them, and a third run reported
+"unchanged, byte for byte". Re-encoding under gate version 3 produced byte-identical
+segments, posters and cards: only the packaging records changed.
 
 Not measured: a real drama frame compresses differently from a colour bed, so the poster
 saving above bounds the format change, not the picture; and no real crawler was asked to
 render the new share card.
+
+Declared trade-off: the feed poster is 540 px wide. On a 375 pt phone at 3× it is shown
+about 2.1× upscaled (the old 720 px JPEG was 1.56×), so it is softer than the video that
+replaces it. It is on screen until the first frame, and during the tap-to-play and error
+states. The bytes (3.6–4.1 kB on the LCP image) were chosen over sharpness; a 1080 px
+variant through `srcset` is not built yet.
 
 ## 4. Definition of done
 

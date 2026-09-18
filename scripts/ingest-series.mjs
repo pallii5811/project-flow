@@ -19,23 +19,30 @@
  *
  * Three properties this script must keep, because a launch depends on them:
  *
- *   - idempotent and resumable: an episode whose master and gate version have
- *     not changed is not re-encoded, so a run interrupted at episode 40 of 80
- *     costs the remaining 40 and nothing else;
- *   - it refuses the whole series when one episode would break the feed —
- *     a gap in the episode numbers, a caption file that does not fit its
- *     episode, a master delivered twice — and the catalog keeps the version
- *     that worked until the delivery is fixed;
+ *   - a refused delivery changes NOTHING that is published. Every episode is
+ *     packaged, and every poster, card and caption written, in a stage folder
+ *     (`.ingest-stage/<slug>/`, on the same disk). Only when the whole series
+ *     passes does the stage replace the published folder, in one rename, and
+ *     only then is the manifest written. A refusal or a crash leaves the
+ *     published series byte for byte as it was;
+ *   - idempotent and resumable: an episode whose master, gate version and gate
+ *     options (audio stream, length range, resolution exception) have not
+ *     changed is not re-encoded. Renditions that passed stay in the stage
+ *     after a refusal or an interruption, so a run stopped at episode 40 of
+ *     80 costs the remaining 40 and nothing else;
  *   - every number in the manifest is measured (ffmpeg, the parsed cues, the
  *     files on disk), never declared by the delivery.
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  copyFileSync,
   existsSync,
+  linkSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -43,15 +50,33 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { captionSummary, checkCaptionTrack, parseVttCues, srtToVtt } from "./lib/vtt.mjs";
+import {
+  captionNotes,
+  captionSummary,
+  checkCaptionTrack,
+  parseVttCues,
+  srtToVtt,
+} from "./lib/vtt.mjs";
 import { checkDuplicateSource, formatIssues } from "./lib/media-gate.mjs";
+import {
+  checkCaptionLicence,
+  checkEpisodeNumbers,
+  checkEpisodeSlugs,
+  checkRights,
+  episodeSlugOf,
+  gateOptionsFor,
+  isInside,
+  isPackageCurrent,
+  isSlug,
+  packageFlags,
+} from "./lib/delivery-rules.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 /**
- * The three roots are overridable so a proof run (scripts/gate-proof.mjs) can
- * drive the real ingest on deliberately broken deliveries without touching
- * the repository's content, published assets or generated manifests.
+ * The roots are overridable so a proof run (scripts/gate-proof.mjs) can drive
+ * the real ingest on deliberately broken deliveries without touching the
+ * repository's content, published assets or generated manifests.
  */
 function rootFlag(name, fallback) {
   const at = process.argv.indexOf(name);
@@ -73,13 +98,26 @@ const generatedRoot = rootFlag(
   "--generated-root",
   join(repoRoot, "packages", "feed-domain", "src", "data", "generated"),
 );
+/**
+ * Where a series is assembled before it replaces the published one. It must
+ * sit on the same disk as the publish root (a rename cannot cross disks) and
+ * outside anything the site build copies.
+ */
+const stageRoot = rootFlag(
+  "--stage-root",
+  process.argv.includes("--publish-root")
+    ? join(dirname(publishRoot), ".ingest-stage")
+    : join(repoRoot, ".ingest-stage"),
+);
 const SERIES_MANIFEST_VERSION = 2;
 /** Poster width in the feed: the slide is at most 450 CSS px wide (speed-7). */
 const POSTER_WIDTH = 540;
 const SHARE_CARD_WIDTH = 1200;
 const SHARE_CARD_HEIGHT = 630;
+/** Must match scripts/package-episode.mjs: a rule change re-runs the pack. */
+const GATE_VERSION = 3;
 
-const ROOT_FLAGS = new Set(["--delivery-root", "--publish-root", "--generated-root"]);
+const ROOT_FLAGS = new Set(["--delivery-root", "--publish-root", "--generated-root", "--stage-root"]);
 const args = process.argv.slice(2);
 const force = args.includes("--force");
 const requestedSlugs = args.filter(
@@ -129,20 +167,97 @@ function isStringArray(value) {
   return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
 }
 
-/** Files the run produced, so anything else under a published folder is stale. */
-function pruneExtras(dir, keep) {
-  if (!existsSync(dir)) return [];
-  const removed = [];
-  for (const name of readdirSync(dir)) {
-    if (keep.has(name)) continue;
-    rmSync(join(dir, name), { recursive: true, force: true });
-    removed.push(name);
-  }
-  return removed;
+/** A synchronous pause, for retrying a rename that Windows refused for a moment. */
+function pause(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-/** The delivery file, before anything is trusted about it. */
+/**
+ * Rename, retried: on Windows an antivirus or an indexer can hold a file for a
+ * moment. A rename that still fails throws, and the caller decides.
+ */
+function renameWithRetry(from, to) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (error) {
+      const busy = ["EPERM", "EBUSY", "EACCES"].includes(error.code);
+      if (!busy || attempt >= 6) throw error;
+      pause(250 * attempt);
+    }
+  }
+}
+
+/**
+ * An episode already published, copied into the stage as hard links: no
+ * bytes are duplicated, and the published files are never opened for writing.
+ */
+function linkTree(from, to) {
+  mkdirSync(to, { recursive: true });
+  for (const name of readdirSync(from)) {
+    const source = join(from, name);
+    const target = join(to, name);
+    if (statSync(source).isDirectory()) {
+      linkTree(source, target);
+      continue;
+    }
+    try {
+      linkSync(source, target);
+    } catch {
+      copyFileSync(source, target);
+    }
+  }
+}
+
+/** Relative path → absolute path, for every file under `dir`. */
+function listFiles(dir, prefix = "", out = new Map()) {
+  if (!existsSync(dir)) return out;
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    const rel = prefix ? `${prefix}/${name}` : name;
+    if (statSync(path).isDirectory()) listFiles(path, rel, out);
+    else out.set(rel, path);
+  }
+  return out;
+}
+
+function sameFile(a, b) {
+  const sa = statSync(a, { bigint: true });
+  const sb = statSync(b, { bigint: true });
+  if (sa.ino !== 0n && sa.ino === sb.ino && sa.dev === sb.dev) return true;
+  if (sa.size !== sb.size) return false;
+  return readFileSync(a).equals(readFileSync(b));
+}
+
+/** Same files, same bytes: then nothing needs to be swapped. */
+function sameTree(a, b) {
+  const left = listFiles(a);
+  const right = listFiles(b);
+  if (left.size !== right.size) return false;
+  for (const [rel, path] of left) {
+    const other = right.get(rel);
+    if (!other || !sameFile(path, other)) return false;
+  }
+  return true;
+}
+
+/** The packaging record of an episode folder, or null when it is not a finished package. */
+function readRecord(dir) {
+  const path = join(dir, "manifest.json");
+  if (!existsSync(path) || !existsSync(join(dir, "master.m3u8"))) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** The delivery file, before anything is trusted about it — and before any path is built from it. */
 function readDelivery(slug) {
+  if (!isSlug(slug)) {
+    die(`"${slug}" is not a series slug: lowercase letters and digits joined by single hyphens`);
+  }
   const dir = join(deliveryRoot, slug);
   const file = join(dir, "series.json");
   if (!existsSync(file)) die(`${file} does not exist: nothing to ingest for "${slug}"`);
@@ -166,43 +281,25 @@ function readDelivery(slug) {
       problems.push(`rights.${key} is not an ISO date: ${String(value)}`);
     }
   }
+  problems.push(...checkRights(delivery));
   if (!Array.isArray(delivery.episodes) || delivery.episodes.length === 0) {
     problems.push("episodes must list at least one episode");
+  } else {
+    // Numbers first: a numbering typo is usually also why two slugs collide.
+    for (const listIssue of [
+      ...checkEpisodeNumbers(delivery.episodes),
+      ...checkEpisodeSlugs(delivery.episodes),
+    ]) {
+      problems.push(`[${listIssue.code}] ${listIssue.message}`);
+    }
   }
   if (problems.length > 0) {
     console.error(`ingest-series: REFUSED ${slug} — the delivery file is incomplete`);
     for (const problem of problems) console.error(`    - ${problem}`);
+    console.error("  Nothing was published or changed. Fix series.json and run again.");
     process.exit(1);
   }
   return { dir, delivery };
-}
-
-/** Episode numbers must be 1..N with no gap: a gap breaks auto-continue. */
-function checkEpisodeNumbers(episodes) {
-  const numbers = episodes.map((episode) => episode.episodeNumber);
-  const issues = [];
-  const seen = new Set();
-  for (const number of numbers) {
-    if (!Number.isInteger(number) || number < 1) {
-      issues.push({ code: "bad_episode_number", message: `"${String(number)}" is not an episode number` });
-      continue;
-    }
-    if (seen.has(number)) {
-      issues.push({ code: "duplicate_episode_number", message: `episode ${number} is delivered twice` });
-    }
-    seen.add(number);
-  }
-  const sorted = [...seen].sort((a, b) => a - b);
-  for (let i = 0; i < sorted.length; i += 1) {
-    if (sorted[i] !== i + 1) {
-      issues.push({
-        code: "episode_gap",
-        message: `episodes jump from ${sorted[i - 1] ?? 0} to ${sorted[i]}: the feed would stop there`,
-      });
-      break;
-    }
-  }
-  return issues;
 }
 
 /** Feed poster (WebP, at the size it is shown) and the landscape link card. */
@@ -250,33 +347,91 @@ function renderImages(master, seconds, posterPath, sharePath) {
   ]);
 }
 
+/**
+ * A crash between the two renames of a swap leaves the old series in the
+ * stage as `<slug>.previous` and nothing published. Put it back first.
+ */
+function recoverInterruptedSwap(slug, publishDir) {
+  const previous = join(stageRoot, `${slug}.previous`);
+  if (!existsSync(previous)) return;
+  if (!existsSync(publishDir)) {
+    renameWithRetry(previous, publishDir);
+    console.error(`ingest-series: ${slug} — restored the published series left by an interrupted run`);
+  } else {
+    rmSync(previous, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The staged series replaces the published one. Two renames: the published
+ * folder steps aside, the stage takes its place. If the second fails, the
+ * first is undone, so the site never points at a half-built folder.
+ */
+function swapIntoPlace(slug, stageDir, publishDir) {
+  const previous = join(stageRoot, `${slug}.previous`);
+  rmSync(previous, { recursive: true, force: true });
+  mkdirSync(dirname(publishDir), { recursive: true });
+  if (existsSync(publishDir)) {
+    try {
+      renameWithRetry(publishDir, previous);
+    } catch (error) {
+      die(
+        `could not move the published ${slug} aside (${error.code ?? error.message}); nothing was changed. ` +
+          `Close whatever holds files under ${publishDir} and run again.`,
+      );
+    }
+  }
+  try {
+    renameWithRetry(stageDir, publishDir);
+  } catch (error) {
+    if (existsSync(previous)) renameWithRetry(previous, publishDir);
+    die(
+      `could not move the new ${slug} into place (${error.code ?? error.message}); the published series was put back unchanged`,
+    );
+  }
+  try {
+    rmSync(previous, { recursive: true, force: true, maxRetries: 3 });
+  } catch (error) {
+    // The swap is done; the old copy is only clutter, removed by the next run.
+    console.error(`ingest-series: ${slug} — the previous version stays in ${previous} for now (${error.code ?? error.message})`);
+  }
+}
+
 function ingestSeries(slug) {
   const { dir, delivery } = readDelivery(slug);
   const publishDir = join(publishRoot, slug);
+  const stageDir = join(stageRoot, slug);
+  const stageHls = join(stageDir, "hls");
+  if (!isInside(publishRoot, publishDir) || !isInside(stageRoot, stageDir)) {
+    die(`"${slug}" resolves outside the publish or stage folder`);
+  }
+  recoverInterruptedSwap(slug, publishDir);
+
+  // Images and captions are rebuilt every run. Staged renditions stay: they
+  // are the resume point of a run that was refused or interrupted.
+  for (const part of ["posters", "share", "captions"]) {
+    rmSync(join(stageDir, part), { recursive: true, force: true });
+  }
+  mkdirSync(stageHls, { recursive: true });
+
   const failures = [];
+  const notes = [];
   const packagedNow = [];
+  const resumed = [];
   const skipped = [];
   const seenSources = new Map();
+  /** Staged episode folders that hold a package the gate accepted. */
+  const validStaged = new Set();
 
-  const episodes = [...delivery.episodes].sort(
-    (a, b) => (a.episodeNumber ?? 0) - (b.episodeNumber ?? 0),
-  );
-  const numberIssues = checkEpisodeNumbers(episodes);
-  if (numberIssues.length > 0) failures.push({ label: slug, issues: numberIssues });
+  // Numbers and slugs were checked by readDelivery: 1..N, safe, unique.
+  const episodes = [...delivery.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber);
 
-  const durationRange = delivery.episodeDurationMs ?? {};
-  const keep = {
-    hls: new Set(),
-    posters: new Set(),
-    share: new Set(),
-    captions: new Set(),
-  };
   const manifestEpisodes = [];
 
   for (const episode of episodes) {
     const number = episode.episodeNumber;
     const label = `${slug} episode ${number}`;
-    const episodeSlug = episode.episodeSlug ?? `episode-${number}`;
+    const episodeSlug = episodeSlugOf(episode);
     const issues = [];
 
     const masterPath = resolve(dir, episode.master ?? "");
@@ -295,51 +450,52 @@ function ingestSeries(slug) {
       continue;
     }
 
-    const hlsDir = join(publishDir, "hls", episodeSlug);
-    keep.hls.add(episodeSlug);
-    const manifestPath = join(hlsDir, "manifest.json");
-    const existing = existsSync(manifestPath) ? readJson(manifestPath) : null;
-    const upToDate =
-      !force &&
-      existing !== null &&
-      existing.sourceSha256 === sourceSha256 &&
-      existing.gateVersion === GATE_VERSION &&
-      existsSync(join(hlsDir, "master.m3u8"));
+    const liveEpisode = join(publishDir, "hls", episodeSlug);
+    const stagedEpisode = join(stageHls, episodeSlug);
+    if (!isInside(stageHls, stagedEpisode)) die(`${label}: "${episodeSlug}" leaves the stage folder`);
+    const gateOptions = gateOptionsFor(delivery, episode);
+    const expected = { sourceSha256, gateVersion: GATE_VERSION, gateOptions };
 
-    let packaged = existing;
-    if (upToDate) {
+    let packaged = null;
+    const staged = force ? null : readRecord(stagedEpisode);
+    const live = force ? null : readRecord(liveEpisode);
+    if (isPackageCurrent(staged, expected)) {
+      packaged = staged;
+      resumed.push(label);
+    } else if (isPackageCurrent(live, expected)) {
+      rmSync(stagedEpisode, { recursive: true, force: true });
+      linkTree(liveEpisode, stagedEpisode);
+      packaged = live;
       skipped.push(label);
     } else {
-      const packageArgs = [
-        join(repoRoot, "scripts", "package-episode.mjs"),
-        masterPath,
-        hlsDir,
-        "--no-poster",
-        "--label",
-        label,
-      ];
-      if (delivery.allowBelow1080p === true) packageArgs.push("--allow-below-1080p");
-      if (Number.isFinite(durationRange.min)) {
-        packageArgs.push("--duration-min-ms", String(durationRange.min));
-      }
-      if (Number.isFinite(durationRange.max)) {
-        packageArgs.push("--duration-max-ms", String(durationRange.max));
-      }
-      if (Number.isInteger(episode.audioStream)) {
-        packageArgs.push("--audio-stream", String(episode.audioStream));
-      }
-      const result = run(process.execPath, packageArgs, { stdio: "inherit" });
+      rmSync(stagedEpisode, { recursive: true, force: true });
+      const result = run(
+        process.execPath,
+        [
+          join(repoRoot, "scripts", "package-episode.mjs"),
+          masterPath,
+          stagedEpisode,
+          "--no-poster",
+          "--label",
+          label,
+          ...packageFlags(gateOptions),
+        ],
+        { stdio: "inherit" },
+      );
       if (result.status !== 0) {
-        // package-episode already printed the reasons, named by label.
+        // package-episode already printed the reasons, named by label. What it
+        // left behind is a half-written stage folder, never a published one.
+        rmSync(stagedEpisode, { recursive: true, force: true });
         failures.push({
           label,
           issues: [{ code: "gate_refused", message: "the technical quality gate refused it (reasons above)" }],
         });
         continue;
       }
-      packaged = readJson(manifestPath);
+      packaged = readJson(join(stagedEpisode, "manifest.json"));
       packagedNow.push(label);
     }
+    validStaged.add(episodeSlug);
 
     const durationMs = packaged.durationMs;
 
@@ -347,13 +503,11 @@ function ingestSeries(slug) {
     // and a poster that silently belongs to an older cut is worse than a wait.
     const posterName = `${episodeSlug}.webp`;
     const shareName = `${episodeSlug}.jpg`;
-    keep.posters.add(posterName);
-    keep.share.add(shareName);
     renderImages(
       masterPath,
       durationMs / 1000,
-      join(publishDir, "posters", posterName),
-      join(publishDir, "share", shareName),
+      join(stageDir, "posters", posterName),
+      join(stageDir, "share", shareName),
     );
 
     const captions = [];
@@ -378,20 +532,25 @@ function ingestSeries(slug) {
       const raw = readFileSync(sourcePath, "utf8");
       const vtt = sourcePath.toLowerCase().endsWith(".srt") ? srtToVtt(raw) : raw;
       const parsed = parseVttCues(vtt);
-      const trackIssues = checkCaptionTrack(parsed, {
-        durationMs,
-        language,
-        hasAudio: packaged.hasAudio === true,
-      });
+      const trackIssues = [
+        ...checkCaptionTrack(parsed, {
+          durationMs,
+          language,
+          hasAudio: packaged.hasAudio === true,
+        }),
+        ...checkCaptionLicence(language, delivery.rights),
+      ];
       if (trackIssues.length > 0) {
         for (const trackIssue of trackIssues) {
           issues.push({ code: trackIssue.code, message: `${trackLabel}: ${trackIssue.message}` });
         }
         continue;
       }
+      for (const note of captionNotes(parsed, durationMs)) {
+        notes.push(`${label} ${trackLabel}: [${note.code}] ${note.message}`);
+      }
       const outName = `${episodeSlug}.${language}.vtt`;
-      keep.captions.add(outName);
-      const outPath = join(publishDir, "captions", outName);
+      const outPath = join(stageDir, "captions", outName);
       mkdirSync(dirname(outPath), { recursive: true });
       writeFileSync(outPath, vtt);
       const summary = captionSummary(parsed, durationMs);
@@ -436,11 +595,23 @@ function ingestSeries(slug) {
     });
   }
 
+  // Staged episode folders that are not a package the gate accepted in this
+  // run — stale slugs, half-written encodes — never reach the published tree.
+  for (const name of existsSync(stageHls) ? readdirSync(stageHls) : []) {
+    if (!validStaged.has(name)) rmSync(join(stageHls, name), { recursive: true, force: true });
+  }
+
   if (failures.length > 0) {
+    // Nothing under the published folder was opened for writing. The stage
+    // keeps only the renditions that passed, so the fixed delivery resumes.
+    for (const part of ["posters", "share", "captions"]) {
+      rmSync(join(stageDir, part), { recursive: true, force: true });
+    }
+    if (readdirSync(stageHls).length === 0) rmSync(stageDir, { recursive: true, force: true });
     console.error(`\ningest-series: REFUSED ${slug} — ${failures.length} episode(s) cannot be published`);
     for (const failure of failures) console.error(formatIssues(failure.label, failure.issues));
     console.error(
-      "  The published catalog keeps the version that worked. Fix the delivery and run again.",
+      "  Nothing published was changed: the catalog and its files keep the version that worked. Fix the delivery and run again.",
     );
     return { ok: false, slug };
   }
@@ -467,6 +638,20 @@ function ingestSeries(slug) {
     episodes: manifestEpisodes,
   };
 
+  // What disappears with the swap, named at the level a person reads it:
+  // "hls/episode-6", "posters/episode-6.webp".
+  const entries = (root) =>
+    new Set([...listFiles(root).keys()].map((rel) => rel.split("/").slice(0, 2).join("/")));
+  const after = entries(stageDir);
+  const removed = [...entries(publishDir)].filter((entry) => !after.has(entry));
+  let replaced = false;
+  if (existsSync(publishDir) && sameTree(stageDir, publishDir)) {
+    rmSync(stageDir, { recursive: true, force: true });
+  } else {
+    swapIntoPlace(slug, stageDir, publishDir);
+    replaced = true;
+  }
+
   const previous = previousManifest(slug);
   if (
     previous &&
@@ -477,14 +662,15 @@ function ingestSeries(slug) {
   }
   writeManifestModule(slug, manifest);
 
-  const removed = [
-    ...pruneExtras(join(publishDir, "hls"), keep.hls),
-    ...pruneExtras(join(publishDir, "posters"), keep.posters),
-    ...pruneExtras(join(publishDir, "share"), keep.share),
-    ...pruneExtras(join(publishDir, "captions"), keep.captions),
-  ];
-
-  reportSeries(slug, manifest, { packagedNow, skipped, removed, publishDir });
+  reportSeries(slug, manifest, {
+    packagedNow,
+    resumed,
+    skipped,
+    removed,
+    replaced,
+    notes,
+    publishDir,
+  });
   return { ok: true, slug, manifest };
 }
 
@@ -582,7 +768,11 @@ function directoryBytes(dir) {
 }
 
 /** The spread the gate cares about: lengths, loudness, caption coverage. */
-function reportSeries(slug, manifest, { packagedNow, skipped, removed, publishDir }) {
+function reportSeries(
+  slug,
+  manifest,
+  { packagedNow, resumed, skipped, removed, replaced, notes, publishDir },
+) {
   const durations = manifest.episodes.map((episode) => episode.durationMs / 1000);
   const loudness = manifest.episodes
     .map((episode) => episode.publishedLufs)
@@ -596,18 +786,23 @@ function reportSeries(slug, manifest, { packagedNow, skipped, removed, publishDi
       : `${Math.min(...values).toFixed(1)} … ${Math.max(...values).toFixed(1)}`;
 
   console.error(`\ningest-series: ${slug} ok — ${manifest.episodes.length} episodes`);
-  console.error(`  packaged now: ${packagedNow.length}, unchanged: ${skipped.length}`);
+  console.error(
+    `  packaged now: ${packagedNow.length}, resumed from the stage: ${resumed.length}, unchanged: ${skipped.length}`,
+  );
   console.error(`  length (s):   ${span(durations)}`);
   console.error(`  loudness:     ${span(loudness)} LUFS (target ${-16})`);
   console.error(
     `  captions:     ${coverage.length} tracks, coverage ${span(coverage.map((value) => value * 100))} %`,
   );
-  console.error(`  published:    ${Math.round(directoryBytes(publishDir) / 1024)} kB under ${basename(publishDir)}`);
+  console.error(
+    `  published:    ${Math.round(directoryBytes(publishDir) / 1024)} kB under ${basename(publishDir)} (${replaced ? "replaced in one swap" : "unchanged, byte for byte"})`,
+  );
   if (removed.length > 0) console.error(`  removed stale: ${removed.join(", ")}`);
+  if (notes.length > 0) {
+    console.error("  worth a look (published anyway):");
+    for (const note of notes) console.error(`    - ${note}`);
+  }
 }
-
-/** Must match scripts/package-episode.mjs: a rule change re-runs the pack. */
-const GATE_VERSION = 2;
 
 const slugs =
   requestedSlugs.length > 0

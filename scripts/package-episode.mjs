@@ -16,7 +16,8 @@
  *   v0/ v1/ …               one rendition per rung: index.m3u8, init.mp4, seg_NNN.m4s
  *   poster.jpg              720 px wide still at 1 s (unless --no-poster)
  *   manifest.json           MEASURED facts: duration, rungs, bytes, real
- *                           bitrates, loudness before and after
+ *                           bitrates, loudness before and after, and the
+ *                           options the gate judged with (ingest's resume key)
  *
  * Rules (docs/standard.md, docs/business-model.md, docs/content-operations.md):
  *   - vertical only: aspect between 0.45 and 0.65, as the catalog validator;
@@ -26,7 +27,11 @@
  *     delivery is usually music and effects, and shipping it loses the words;
  *   - audio normalised to −16 LUFS / −1.5 dBTP (EBU R128, two-pass loudnorm),
  *     and the result MEASURED on the packaged audio, not assumed;
- *   - no black or silent opening, no frozen picture: the hook is the product;
+ *   - no black, frozen or silent opening: the hook is the product; after the
+ *     opening only a still longer than any shot (10 s) is refused, so fades,
+ *     end cards and freeze-frame endings pass;
+ *   - the shape is the one the viewer sees: a rotation flag is applied before
+ *     the vertical check, and the recorded size is measured on the top rung;
  *   - rungs never upscale the master;
  *   - 2-second segments with a keyframe exactly every 2 seconds, so any rung
  *     can switch at any segment and a swipe needs only a few seconds of data;
@@ -52,6 +57,7 @@ import {
   checkPublishedLoudness,
   checkSilence,
   chooseAudioStream,
+  displayDimensions,
   formatIssues,
   parseDetections,
   parseEbur128Summary,
@@ -61,7 +67,7 @@ import {
 const SEGMENT_SECONDS = 2;
 const MAX_MB_PER_MINUTE_LOWEST = 5;
 /** Bumped when a rule changes, so ingest re-runs episodes packaged under the old one. */
-const GATE_VERSION = 2;
+const GATE_VERSION = 3;
 
 /** Vertical ladder: height, video cap, audio bitrate. */
 const LADDER = [
@@ -173,7 +179,7 @@ const probe = JSON.parse(
     "-v",
     "error",
     "-show_entries",
-    "stream=index,codec_type,codec_name,channels,width,height,r_frame_rate:stream_tags=language:format=duration",
+    "stream=index,codec_type,codec_name,channels,width,height,r_frame_rate:stream_tags=language,rotate:stream_side_data=rotation:format=duration",
     "-of",
     "json",
     input,
@@ -185,7 +191,8 @@ if (!video) {
   refuse(label, [{ code: "no_video", message: "the master has no video stream" }]);
 }
 
-const { width, height } = video;
+// The picture as it is shown, after the rotation flag ffmpeg applies on decode.
+const { width, height, rotation } = displayDimensions(video);
 const [fpsNum, fpsDen] = String(video.r_frame_rate).split("/").map(Number);
 const fps = fpsDen ? fpsNum / fpsDen : fpsNum;
 const durationMs = Number.isFinite(durationSeconds)
@@ -220,7 +227,7 @@ const firstPass = runCapturingStderr("ffmpeg", [
   "-map",
   `0:a:${audioIndex}`,
   "-vf",
-  `blackdetect=d=0.3:pix_th=0.10,freezedetect=n=-60dB:d=${QUALITY_RULES.freezeMaxSeconds}`,
+  `blackdetect=d=0.3:pix_th=0.10,freezedetect=n=-60dB:d=${QUALITY_RULES.freezeOpeningMaxSeconds}`,
   "-af",
   `silencedetect=n=-50dB:d=1,loudnorm=I=${QUALITY_RULES.targetLufs}:TP=-1.5:LRA=11:print_format=json`,
   "-f",
@@ -372,16 +379,36 @@ function checkPlaylist(dir, name) {
       fail(`rendition ${name} lists ${uri}, which does not exist`);
     }
   }
-  return segmentUris.length;
+  return { segments: segmentUris.length, initUri: mapUri };
+}
+
+/** Width and height of a produced rendition, read from its init segment. */
+function renditionSize(path) {
+  const probed = JSON.parse(
+    run("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height:stream_side_data=rotation",
+      "-of",
+      "json",
+      path,
+    ]),
+  );
+  return displayDimensions(probed.streams?.[0]);
 }
 
 const measured = rungs.map((rung, i) => {
   const dir = join(output, `v${i}`);
-  const segments = checkPlaylist(dir, `v${i}`);
+  const { segments, initUri } = checkPlaylist(dir, `v${i}`);
   const bytes = directoryBytes(dir);
+  const size = renditionSize(join(dir, initUri));
   return {
     name: `v${i}`,
-    height: rung.height,
+    width: size.width,
+    height: size.height,
     maxrateKbps: rung.maxrateKbps,
     audioKbps: rung.audioKbps,
     segments,
@@ -390,6 +417,24 @@ const measured = rungs.map((rung, i) => {
   };
 });
 if (!readdirSync(output).includes("master.m3u8")) fail("master.m3u8 was not written");
+
+/**
+ * What the viewer will receive, measured on the files produced: the top rung
+ * must be vertical and no taller than the master. The catalog records these
+ * numbers, not the ones read from the master's header.
+ */
+const top = measured[measured.length - 1];
+const producedIssues = checkMasterShape(
+  { width: top.width, height: top.height, fps, durationMs },
+  { allowBelow1080p: true, durationMinMs: 0, durationMaxMs: Number.MAX_SAFE_INTEGER },
+).filter((entry) => entry.code === "not_vertical" || entry.code === "unreadable_dimensions");
+if (top.height > height) {
+  producedIssues.push({
+    code: "upscaled",
+    message: `the top rendition is ${top.width}x${top.height}, taller than the ${width}x${height} master`,
+  });
+}
+if (producedIssues.length > 0) refuse(label, producedIssues);
 
 /**
  * The loudness of what will actually be served, read back from the packaged
@@ -431,9 +476,20 @@ const manifest = {
   gateVersion: GATE_VERSION,
   source: basename(input),
   sourceSha256: createHash("sha256").update(readFileSync(input)).digest("hex"),
+  // What the gate was asked to judge with. Ingest compares it on the next run:
+  // a corrected delivery (another audio stream, another length range) must be
+  // judged again, not reused.
+  gateOptions: {
+    allowBelow1080p,
+    audioStream: audioStreamFlag,
+    durationMinMs,
+    durationMaxMs,
+  },
   durationMs,
-  width,
-  height,
+  // Measured on the top rendition that will be served.
+  width: top.width,
+  height: top.height,
+  master: { width, height, rotation },
   fps: Number(fps.toFixed(3)),
   hasAudio: true,
   audioStream: audioIndex,

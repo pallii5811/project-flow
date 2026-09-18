@@ -68,6 +68,7 @@ export {
 
 export {
   FEED_CATALOG_PAYLOAD_VERSION,
+  PRODUCER_WITHHELD,
   firstFramePayload,
   fromFeedCatalogPayload,
   toFeedCatalogPayload,
@@ -76,6 +77,7 @@ export type {
   FeedCatalogPayload,
   FeedItemCopy,
   FeedItemPayload,
+  FeedSeriesPayload,
 } from "./catalog/feedCatalogPayload";
 
 export {

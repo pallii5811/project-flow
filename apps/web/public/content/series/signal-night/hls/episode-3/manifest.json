@@ -1,11 +1,22 @@
 {
   "schemaVersion": 2,
-  "gateVersion": 2,
+  "gateVersion": 3,
   "source": "episode-3.mp4",
   "sourceSha256": "e0662e79751457cfcbfdb650822b9d183bff46e6f075546df46e8b93d691c3f3",
+  "gateOptions": {
+    "allowBelow1080p": true,
+    "audioStream": null,
+    "durationMinMs": 8000,
+    "durationMaxMs": 15000
+  },
   "durationMs": 10000,
   "width": 720,
   "height": 1280,
+  "master": {
+    "width": 720,
+    "height": 1280,
+    "rotation": 0
+  },
   "fps": 25,
   "hasAudio": true,
   "audioStream": 0,
@@ -13,6 +24,7 @@
   "renditions": [
     {
       "name": "v0",
+      "width": 360,
       "height": 640,
       "maxrateKbps": 600,
       "audioKbps": 64,
@@ -22,6 +34,7 @@
     },
     {
       "name": "v1",
+      "width": 540,
       "height": 960,
       "maxrateKbps": 1400,
       "audioKbps": 96,
@@ -31,6 +44,7 @@
     },
     {
       "name": "v2",
+      "width": 720,
       "height": 1280,
       "maxrateKbps": 2500,
       "audioKbps": 128,

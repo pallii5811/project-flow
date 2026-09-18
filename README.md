@@ -63,11 +63,11 @@ npm install
 
 ## Publishing a series
 
-`node scripts/ingest-series.mjs [slug]` turns a studio delivery (`content/series/<slug>/`: masters, subtitles and a `series.json` carrying the rights) into a publishable series: adaptive HLS, a WebP poster, a 1200×630 link card, verified WebVTT and the series manifest the catalog is built from. It is idempotent — an unchanged episode is not re-encoded — and it refuses the whole series when one episode would break the feed, keeping the version that worked.
+`node scripts/ingest-series.mjs [slug]` turns a studio delivery (`content/series/<slug>/`: masters, subtitles and a `series.json` carrying the rights) into a publishable series: adaptive HLS, a WebP poster, a 1200×630 link card, verified WebVTT and the series manifest the catalog is built from. It is idempotent — an unchanged episode is not re-encoded — and it refuses the whole series when one episode would break the feed. Everything is built in a stage folder and swapped in only when the whole series passes, so a refusal leaves every published file and the manifest byte for byte as they were.
 
 `node scripts/package-episode.mjs <master> <output-dir>` does one episode, with the same quality gate: vertical, at least 1080×1920, one dialogue audio track, loudness normalised to −16 LUFS and measured back on the packaged audio, no black, frozen or silent opening, and a lightest rung under 5 MB per watched minute.
 
-`node scripts/gate-proof.mjs` proves the gate by breaking it: six real deliveries, one per rule, refused for the reason they should be.
+`npm run proof:gate` proves the pipeline on 18 real deliveries (CI runs it): each broken rule refused for the reason it should be, real endings (fade to black, end card, freeze-frame) accepted, and a refused re-delivery proven to change no published file.
 
 What a studio must deliver, what each check means and what to do when one fails: [`docs/content-operations.md`](docs/content-operations.md). Example pack: `content/series/signal-night/README.md`.
 

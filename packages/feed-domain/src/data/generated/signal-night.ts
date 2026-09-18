@@ -47,8 +47,8 @@ export const SIGNAL_NIGHT_MANIFEST: SeriesManifest = {
     "windowStart": "2026-01-01T00:00:00.000Z",
     "windowEnd": null
   },
-  "packagedAt": "2026-09-17T22:32:47.042Z",
-  "gateVersion": 2,
+  "packagedAt": "2026-09-18T01:14:32.395Z",
+  "gateVersion": 3,
   "episodes": [
     {
       "episodeNumber": 1,
@@ -95,8 +95,8 @@ export const SIGNAL_NIGHT_MANIFEST: SeriesManifest = {
           "kind": "subtitles",
           "default": false,
           "status": "ready",
-          "cues": 2,
-          "coverage": 0.45
+          "cues": 3,
+          "coverage": 0.63
         }
       ],
       "sourceSha256": "d5e42794945499fd6e3d97cab417e647e0b48a7b9cc9851ed73f6787843b3a07",

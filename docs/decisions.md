@@ -4,6 +4,27 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-18 — Content pipeline: a refusal publishes nothing; still endings pass; rights the site cannot honour are refused
+
+**Decision:** `scripts/ingest-series.mjs` builds every series in a stage folder (`.ingest-stage/<slug>/`, git-ignored, same disk) and replaces the published folder in one rename only when every episode passes; the manifest is written after. A refusal or a crash leaves published files and manifest byte-identical. An episode is reused only when its master, the gate version (now 3) AND the options it was judged with (`audioStream`, `episodeDurationMs`, `allowBelow1080p`) are unchanged; renditions that passed survive a refusal in the stage, so a fixed delivery resumes them.
+
+Gate rule changes, each with its test changed:
+
+- **Frozen picture.** A still of 1.5 s or more inside the first 5 s is refused (`frozen_opening`). After the opening a still is a shot — a fade to black, an end card, a freeze-frame cliffhanger, a text message on a phone — and is refused only at 10 s or more (`frozen_picture`: the master froze). Before, any 1.5 s still anywhere was refused, which refused standard short-drama endings.
+- **Subtitle tail.** The last cue must reach 60% of the episode (was 50%): a file cut off at 55% passed. A tail of more than 20% and more than 5 s without text passes but is named in the report (`quiet_tail`).
+- **Shape.** The vertical check uses the picture as shown, after the rotation flag; the size recorded in the manifest is measured on the top rendition, which must be vertical and no taller than the master.
+- **Languages.** Tags with a 3-letter primary subtag (`fil`, `yue`, `haw`) are valid. SRT conversion drops only a number that sits right before a timing line, so a line of dialogue "47" survives.
+- **Rights.** Territories must be `["WORLD"]` until the serving side can restrict by country; `defaultLocale` and every caption language must be in `rights.languages`. `episodeSlug` must match the site's slug shape and be unique.
+- The browser catalog (`catalog/feed.json`, inlined first frames) no longer carries territories, languages, the producer of record or `socialClipsAllowed`; it carries the window end. The per-episode packaging record stays out of the export.
+
+**Why:** The batch-4 review proved on scratch copies that a refused re-delivery overwrote the live episode's HLS, poster and card (a numbering typo made episode 2 play episode 3's video); that fades and end cards were refused; that a landscape picture behind a rotation flag shipped as landscape renditions; that a corrected `audioStream` kept the wrong stem live; that `episodeSlug: ".."` wiped the series folder; that a US-only title was accepted for the worldwide site. On the real stand-in pack the tightened tail rule found the Spanish subtitles of episode 1 one line short.
+
+**Consequences:** `npm run proof:gate` (18 real deliveries, about 2 minutes) runs in CI after the unit tests, on the runner's ffmpeg. Titles licensed per territory cannot be listed until geo-restriction exists. The published series folder is fully generated: a file placed there by hand is removed at the next accepted ingest.
+
+**Revisit:** When media moves to zero-egress storage (the swap becomes a manifest switch); when a licensed title needs territories (geo-restriction at the edge); when real deliveries show a legitimate still longer than 10 s.
+
+---
+
 ## 2026-09-17 — Accessibility and polish: keys that respect controls, a real Tune dialog, a player that survives landscape
 
 **Decision:** The feed's global keys never take a key that belongs to someone else: nothing while a dialog is open or inside one, nothing in a text field, nothing with Ctrl, Alt or Meta, and Space on a focused button or link presses that control instead of pausing. The arrow keys still move between episodes from a rail button. The Tune sheet is a modal dialog: focus moves to its first chip, Tab and Shift+Tab wrap inside it, Escape closes it wherever focus is, focus returns to Tune, a visible Close button sits next to its title (`#b3b0a8`, 8.4:1), and the feed behind it is `inert`. A chip says what it did in a notice ("Darker stories are up next", or "Nothing new for that yet" when the catalog had no candidate). Decisions pure in `apps/web/src/features/feed/a11y.ts`.
