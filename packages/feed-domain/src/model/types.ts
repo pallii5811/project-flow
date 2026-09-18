@@ -22,6 +22,12 @@ export type PlaybackDescriptor = {
   aspectRatio: number;
   /** Poster reference (same asset boundary as video). */
   posterReference: string;
+  /**
+   * Landscape 1200×630 card for link previews (VIR-4). Crawlers crop wide
+   * cards to about 1.91:1, so the portrait poster loses the face and the
+   * title; this image is generated from the same frame at ingest.
+   */
+  shareCardReference: string;
   /** ISO-8601; null = does not expire. */
   expiresAt: string | null;
   preloadHint: PreloadHint;
@@ -48,6 +54,25 @@ export type LocalizedStrings = {
 /** Locale → copy. Fallback: requested → base language → defaultLocale. */
 export type LocalizedMetadata = Record<string, LocalizedStrings>;
 
+/**
+ * Rights on paper, carried by the series itself (F8, docs/roadmap.md).
+ *
+ * The curation gate asks for territories, languages, window and producer of
+ * record before a series enters the catalog; keeping them next to the series
+ * is what lets the code refuse to list a title outside its window instead of
+ * trusting a spreadsheet.
+ */
+export type SeriesRights = {
+  /** ISO 3166-1 alpha-2 codes, or the single entry "WORLD". */
+  territories: string[];
+  /** Languages the licence covers (audio or subtitles), as BCP-47 tags. */
+  languages: string[];
+  /** ISO-8601; null = the window has always been open. */
+  windowStart: string | null;
+  /** ISO-8601; null = the window does not close. */
+  windowEnd: string | null;
+};
+
 export type Series = {
   id: string;
   seriesSlug: string;
@@ -57,7 +82,25 @@ export type Series = {
   totalEpisodes: number;
   defaultLocale: string;
   localizedMetadata: LocalizedMetadata;
+  /** Producer of record: who is paid and who answers for the rights (CP-6). */
+  producerId: string;
+  /** Social clips of this title are allowed only when the producer said so. */
+  socialClipsAllowed: boolean;
+  rights: SeriesRights;
 };
+
+/** Is the licence window open at `now`? An unreadable date is never open. */
+export function isSeriesWindowOpen(rights: SeriesRights, now: number): boolean {
+  if (rights.windowStart !== null) {
+    const start = Date.parse(rights.windowStart);
+    if (!Number.isFinite(start) || start > now) return false;
+  }
+  if (rights.windowEnd !== null) {
+    const end = Date.parse(rights.windowEnd);
+    if (!Number.isFinite(end) || end <= now) return false;
+  }
+  return true;
+}
 
 export type ContentItem = {
   id: string;

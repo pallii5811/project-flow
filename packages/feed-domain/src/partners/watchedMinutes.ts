@@ -37,11 +37,19 @@ export type WatchProgressRecord = {
 export type WatchedMinutesRow = {
   seriesId: string;
   market: string | null;
+  /** Calendar month in UTC, e.g. "2026-10". A statement is always one month. */
+  period: string;
   watchedMs: number;
 };
 
 export type WatchedMinutesResult = {
   rows: WatchedMinutesRow[];
+  /**
+   * Every market and every month added together. Useful to see the size of
+   * the whole, never to build a statement: paying a US statement on worldwide
+   * minutes overpays the rich pool from emerging-market viewing (CP-5). Use
+   * `watchedMsBySeriesFor` for anything that becomes money.
+   */
   watchedMsBySeries: Record<string, number>;
   totalWatchedMs: number;
   counts: {
@@ -120,6 +128,13 @@ export function watchProgressRecordsFromEnvelopes(
   return { records, ignored, rejected };
 }
 
+/** UTC month of an instant: the month a statement is issued for. */
+export function periodOf(timestampMs: number): string {
+  const date = new Date(timestampMs);
+  const month = date.getUTCMonth() + 1;
+  return `${date.getUTCFullYear()}-${month < 10 ? "0" : ""}${month}`;
+}
+
 function clampPosition(record: WatchProgressRecord): number {
   return record.durationMs === null
     ? record.positionMs
@@ -162,13 +177,15 @@ export function computeWatchedMinutes(
         wallAdvance + WATCH_SAMPLE_JITTER_TOLERANCE_MS,
       );
 
-      const rowKey = JSON.stringify([current.seriesId, current.market]);
+      const period = periodOf(current.timestampMs);
+      const rowKey = JSON.stringify([current.seriesId, current.market, period]);
       const row = byRow.get(rowKey);
       if (row) row.watchedMs += earned;
       else
         byRow.set(rowKey, {
           seriesId: current.seriesId,
           market: current.market,
+          period,
           watchedMs: earned,
         });
     }
@@ -177,7 +194,8 @@ export function computeWatchedMinutes(
   const rows = [...byRow.values()].sort(
     (a, b) =>
       a.seriesId.localeCompare(b.seriesId) ||
-      (a.market ?? "").localeCompare(b.market ?? ""),
+      (a.market ?? "").localeCompare(b.market ?? "") ||
+      a.period.localeCompare(b.period),
   );
   const watchedMsBySeries: Record<string, number> = {};
   let totalWatchedMs = 0;
@@ -193,4 +211,52 @@ export function computeWatchedMinutes(
     totalWatchedMs,
     counts: { received: records.length, used: records.length - duplicates, duplicates },
   };
+}
+
+export type MarketPeriodSelection = {
+  /** Country code the revenue belongs to. */
+  market: string;
+  /** Calendar month in UTC, e.g. "2026-10". */
+  period: string;
+};
+
+export type MarketPeriodWatchTime = {
+  /** Minutes of this market and month only — what a statement may be built on. */
+  watchedMsBySeries: Record<string, number>;
+  /**
+   * Watch time of the same month that reached us without a country. It belongs
+   * to some market; we do not know which, so it is never added to this one and
+   * the statement declares it instead.
+   */
+  unattributedMs: number;
+  rowsUsed: number;
+};
+
+/**
+ * The minutes of ONE market and ONE month (CP-5).
+ *
+ * `watchedMsBySeries` on the full result mixes every market and month; feeding
+ * it to `buildProducerStatement`, which takes a single market, would pay a US
+ * pool for minutes watched anywhere. This is the only shape a statement
+ * should see.
+ */
+export function watchedMsBySeriesFor(
+  result: WatchedMinutesResult,
+  selection: MarketPeriodSelection,
+): MarketPeriodWatchTime {
+  const watchedMsBySeries: Record<string, number> = {};
+  let unattributedMs = 0;
+  let rowsUsed = 0;
+  for (const row of result.rows) {
+    if (row.period !== selection.period) continue;
+    if (row.market === null) {
+      unattributedMs += row.watchedMs;
+      continue;
+    }
+    if (row.market !== selection.market) continue;
+    watchedMsBySeries[row.seriesId] =
+      (watchedMsBySeries[row.seriesId] ?? 0) + row.watchedMs;
+    rowsUsed += 1;
+  }
+  return { watchedMsBySeries, unattributedMs, rowsUsed };
 }

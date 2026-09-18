@@ -18,3 +18,9 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test
+      # The content pipeline on real files: every gate rule refused on purpose,
+      # real endings accepted, and a refused re-delivery proven to leave the
+      # published series byte for byte as it was.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: npm run proof:gate

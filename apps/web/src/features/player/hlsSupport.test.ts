@@ -4,6 +4,7 @@ import {
   ACTIVE_BUFFER_SECONDS,
   ACTIVE_MAX_BUFFER_SECONDS,
   DEFAULT_START_ESTIMATE_BPS,
+  NEXT_EPISODE_WARM_CEILING_SECONDS,
   NEXT_EPISODE_WARM_SECONDS,
   HLS_ENGINE_CHUNK_PLACEHOLDER,
   buildHlsWarmupScript,
@@ -172,10 +173,15 @@ describe("planHlsLoad — current fully warm, next only its first seconds", () =
     // hls.js reads maxBufferLength as a floor: the ceiling must be capped too.
     expect(planHlsLoad(false, "auto")).toEqual({
       load: "segments",
-      targetBufferSeconds: NEXT_EPISODE_WARM_SECONDS,
-      maxBufferSeconds: NEXT_EPISODE_WARM_SECONDS,
+      targetBufferSeconds: NEXT_EPISODE_WARM_CEILING_SECONDS,
+      maxBufferSeconds: NEXT_EPISODE_WARM_CEILING_SECONDS,
     });
     expect(NEXT_EPISODE_WARM_SECONDS).toBeLessThanOrEqual(4);
+    // Under two 2-second segments: with audio muxed in, the buffered range is
+    // the video/audio intersection and lands milliseconds short of 4.000 s, so
+    // a ceiling of exactly 4 s bought a third segment (measured 2026-09-18).
+    expect(NEXT_EPISODE_WARM_CEILING_SECONDS).toBeLessThan(4);
+    expect(NEXT_EPISODE_WARM_CEILING_SECONDS).toBeGreaterThan(2);
   });
 
   it("downloads no media for the previous episode", () => {

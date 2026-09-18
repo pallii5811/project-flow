@@ -31,7 +31,7 @@ Create the fastest, simplest, most beautiful and addictive short-drama experienc
 
 ## Before any change
 
-1. Read `docs/vision.md`, `docs/product-principles.md`, `docs/ux-principles.md`, `docs/metrics.md`, `docs/roadmap.md`, `docs/decisions.md`, `docs/business-model.md`, `docs/standard.md`, `docs/content-strategy.md`.
+1. Read `docs/vision.md`, `docs/product-principles.md`, `docs/ux-principles.md`, `docs/metrics.md`, `docs/roadmap.md`, `docs/decisions.md`, `docs/business-model.md`, `docs/standard.md`, `docs/content-strategy.md`. For anything touching series, episodes or their assets, also `docs/content-operations.md`.
 2. For implementation work, obey `docs/mvp/MVP-V0-SPEC.md`.
 3. Inspect the repository before changing architecture.
 4. Justify any new dependency.

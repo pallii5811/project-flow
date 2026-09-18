@@ -1,42 +1,71 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "gateVersion": 3,
   "source": "episode-3.mp4",
-  "sourceSha256": "c96c207728af9da4acecb95cafce1d1a3480f1eaa6111c442a2276eb236ea289",
+  "sourceSha256": "e0662e79751457cfcbfdb650822b9d183bff46e6f075546df46e8b93d691c3f3",
+  "gateOptions": {
+    "allowBelow1080p": true,
+    "audioStream": null,
+    "durationMinMs": 8000,
+    "durationMaxMs": 15000
+  },
   "durationMs": 10000,
   "width": 720,
   "height": 1280,
+  "master": {
+    "width": 720,
+    "height": 1280,
+    "rotation": 0
+  },
   "fps": 25,
-  "hasAudio": false,
+  "hasAudio": true,
+  "audioStream": 0,
   "segmentSeconds": 2,
   "renditions": [
     {
       "name": "v0",
+      "width": 360,
       "height": 640,
       "maxrateKbps": 600,
-      "audioKbps": null,
+      "audioKbps": 64,
       "segments": 5,
-      "bytes": 163644,
-      "averageKbps": 131
+      "bytes": 279066,
+      "averageKbps": 223
     },
     {
       "name": "v1",
+      "width": 540,
       "height": 960,
       "maxrateKbps": 1400,
-      "audioKbps": null,
+      "audioKbps": 96,
       "segments": 5,
-      "bytes": 400293,
-      "averageKbps": 320
+      "bytes": 562341,
+      "averageKbps": 450
     },
     {
       "name": "v2",
+      "width": 720,
       "height": 1280,
       "maxrateKbps": 2500,
-      "audioKbps": null,
+      "audioKbps": 128,
       "segments": 5,
-      "bytes": 1027232,
-      "averageKbps": 822
+      "bytes": 1098638,
+      "averageKbps": 879
     }
   ],
-  "mbPerMinuteLowest": 0.98,
+  "mbPerMinuteLowest": 1.67,
+  "loudness": {
+    "targetLufs": -16,
+    "deliveredLufs": -44.64,
+    "deliveredTruePeakDb": -40.15,
+    "publishedLufs": -16,
+    "publishedTruePeakDb": -11.8,
+    "publishedRangeLu": 0
+  },
+  "picture": {
+    "blackRanges": 0,
+    "freezeRanges": 0,
+    "silenceRanges": 0
+  },
   "ffmpeg": "ffmpeg version 8.0.1-full_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers"
 }

@@ -123,10 +123,12 @@ What we can give without cash:
 
 ### Declared risk and owner decision points
 
-- If licensors of proven titles require **minimum guarantees** or flat fees, the gate cannot
-  be met on revenue share alone. The options belong to the owner:
-  - a launch-partner uplift of the share;
-  - a funding partner for guarantees;
+- If licensors of proven titles require **minimum guarantees** or flat fees, we pass on the
+  title. Rejected, because it would change the terms (2026-09-18): guarantees and flat fees
+  are money the owner does not have, and the public page promises "no fees, no minimums" on
+  both sides. A declined guarantee is a reason to say no to a title, not a pending option.
+  What remains open to the owner:
+  - a launch-partner uplift of the **share** (still revenue, still no cash up front);
   - a smaller launch with a later public push.
 - The quality and rights gates are **never** lowered to reach the numbers.
 

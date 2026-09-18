@@ -30,6 +30,9 @@ Thumbs.db
 !.vscode/extensions.json
 !.vscode/settings.json
 
+# Content ingest: a series is assembled here before it replaces the published one
+.ingest-stage/
+
 # Logs / temp
 *.log
 npm-debug.log*

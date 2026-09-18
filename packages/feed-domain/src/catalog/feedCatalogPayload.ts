@@ -46,9 +46,20 @@ export type FeedItemPayload = {
   copy: Record<string, FeedItemCopy>;
 };
 
+/**
+ * A series as the browser receives it. Licence terms (territories, languages)
+ * and the producer of record are commercial facts the feed never shows and
+ * the file is public, so they stay on the build side. The only licence fact
+ * the client acts on is when the window closes — also each episode's
+ * `playback.expiresAt`, checked at every activation.
+ */
+export type FeedSeriesPayload = Omit<Series, "producerId" | "socialClipsAllowed" | "rights"> & {
+  windowEnd: string | null;
+};
+
 export type FeedCatalogPayload = {
   version: typeof FEED_CATALOG_PAYLOAD_VERSION;
-  series: Series[];
+  series: FeedSeriesPayload[];
   /** Feed order for the full catalog; [target, next] for a first-frame payload. */
   items: FeedItemPayload[];
 };
@@ -98,19 +109,28 @@ function toItemPayload(item: ContentItem, series: Series): FeedItemPayload {
   };
 }
 
+function toSeriesPayload(series: Series): FeedSeriesPayload {
+  return {
+    id: series.id,
+    seriesSlug: series.seriesSlug,
+    title: series.title,
+    status: series.status,
+    coverUrl: series.coverUrl,
+    totalEpisodes: series.totalEpisodes,
+    defaultLocale: series.defaultLocale,
+    localizedMetadata: titlesAndHooks(series.localizedMetadata),
+    windowEnd: series.rights.windowEnd,
+  };
+}
+
 function build(catalog: FeedCatalog, items: ContentItem[]): FeedCatalogPayload {
   const seriesById = new Map(catalog.series.map((entry) => [entry.id, entry]));
-  const usedSeries = new Map<string, Series>();
+  const usedSeries = new Map<string, FeedSeriesPayload>();
   const payloadItems: FeedItemPayload[] = [];
   for (const item of items) {
     const series = seriesById.get(item.seriesId);
     if (!series) continue;
-    if (!usedSeries.has(series.id)) {
-      usedSeries.set(series.id, {
-        ...series,
-        localizedMetadata: titlesAndHooks(series.localizedMetadata),
-      });
-    }
+    if (!usedSeries.has(series.id)) usedSeries.set(series.id, toSeriesPayload(series));
     payloadItems.push(toItemPayload(item, series));
   }
   return {
@@ -162,6 +182,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * The browser never receives the producer of record. The client model still
+ * has the field, so it carries this marker: nothing in the feed reads it, and
+ * a statement built from a browser catalog would pay nobody by name.
+ */
+export const PRODUCER_WITHHELD = "withheld-from-the-browser";
+
+/**
+ * Series payload → the client's Series. Every value is either sent or follows
+ * from what ingest guarantees for anything published:
+ *   - territories: ["WORLD"] — ingest refuses any other territory (the site
+ *     cannot restrict by country), so every listed series is worldwide;
+ *   - languages: the spoken language and the caption languages of its
+ *     episodes, each of which ingest checked against the licence;
+ *   - the window: already open (the build dropped the rest), closing at
+ *     `windowEnd`;
+ *   - social clips: not allowed, the default until a clip feature exists.
+ */
+function toClientSeries(entry: FeedSeriesPayload, captionLanguages: Set<string> | undefined): Series {
+  const languages = new Set<string>([entry.defaultLocale, ...(captionLanguages ?? [])]);
+  return {
+    id: entry.id,
+    seriesSlug: entry.seriesSlug,
+    title: entry.title,
+    status: entry.status,
+    coverUrl: entry.coverUrl,
+    totalEpisodes: entry.totalEpisodes,
+    defaultLocale: entry.defaultLocale,
+    localizedMetadata: entry.localizedMetadata,
+    producerId: PRODUCER_WITHHELD,
+    socialClipsAllowed: false,
+    rights: {
+      territories: ["WORLD"],
+      languages: [...languages],
+      windowStart: null,
+      windowEnd: entry.windowEnd ?? null,
+    },
+  };
+}
+
+/**
  * Payload → catalog. The result still goes through createDeterministicFeedSource,
  * which validates every item, so this only rebuilds what was derived.
  */
@@ -172,9 +232,22 @@ export function fromFeedCatalogPayload(raw: unknown): FeedCatalog {
   if (!Array.isArray(raw.series) || !Array.isArray(raw.items)) {
     throw new Error("Feed catalog payload is malformed");
   }
-  const series = raw.series as Series[];
+  const payloadItems = raw.items as FeedItemPayload[];
+  // One pass: at catalog scale a per-series scan of every item is quadratic.
+  const captionLanguages = new Map<string, Set<string>>();
+  for (const item of payloadItems) {
+    let languages = captionLanguages.get(item.seriesId);
+    if (!languages) {
+      languages = new Set();
+      captionLanguages.set(item.seriesId, languages);
+    }
+    for (const track of item.captions) languages.add(track.language);
+  }
+  const series = (raw.series as FeedSeriesPayload[]).map((entry) =>
+    toClientSeries(entry, captionLanguages.get(entry.id)),
+  );
   const titles = new Map(series.map((entry) => [entry.id, entry.title]));
-  const items: ContentItem[] = (raw.items as FeedItemPayload[]).map((item) => {
+  const items: ContentItem[] = payloadItems.map((item) => {
     const localizedMetadata: ContentItem["localizedMetadata"] = {};
     for (const [locale, strings] of Object.entries(item.copy ?? {})) {
       localizedMetadata[locale] = { title: strings.title, hook: strings.hook };

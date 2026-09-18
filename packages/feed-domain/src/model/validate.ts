@@ -8,11 +8,13 @@ import type {
   PlaybackDescriptor,
   PreloadHint,
   Series,
+  SeriesRights,
 } from "./types";
 import {
   ALLOWED_VIDEO_MIME,
   VERTICAL_ASPECT_MAX,
   VERTICAL_ASPECT_MIN,
+  isSeriesWindowOpen,
 } from "./types";
 
 export type ValidationIssue = {
@@ -117,6 +119,16 @@ function parsePlayback(
     issues.push(issue("missing_poster", `${path}.posterReference`, "poster required"));
     return null;
   }
+  if (!isNonEmptyString(row.shareCardReference)) {
+    issues.push(
+      issue(
+        "missing_share_card",
+        `${path}.shareCardReference`,
+        "landscape share card required: a shared link would show a cropped portrait poster",
+      ),
+    );
+    return null;
+  }
   if (!isNonEmptyString(row.mimeType) || !ALLOWED_VIDEO_MIME.has(row.mimeType)) {
     issues.push(
       issue("invalid_mime", `${path}.mimeType`, `Unsupported MIME: ${String(row.mimeType)}`),
@@ -169,8 +181,71 @@ function parsePlayback(
     height: row.height,
     aspectRatio,
     posterReference: row.posterReference,
+    shareCardReference: row.shareCardReference,
     expiresAt,
     preloadHint,
+  };
+}
+
+/**
+ * Rights are the first item of the curation gate (docs/business-model.md) and
+ * F8 of the roadmap: a series without them cannot be published, because
+ * nobody could say where, in which language, and until when it may be shown.
+ */
+function parseRights(
+  raw: unknown,
+  path: string,
+  issues: ValidationIssue[],
+): SeriesRights | null {
+  if (typeof raw !== "object" || raw === null) {
+    issues.push(issue("missing_rights", path, "rights required: territories, languages, window"));
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const territories = row.territories;
+  const languages = row.languages;
+  if (
+    !isStringArray(territories) ||
+    territories.length === 0 ||
+    territories.some((entry) => entry.trim().length === 0)
+  ) {
+    issues.push(issue("missing_territories", `${path}.territories`, "at least one territory"));
+    return null;
+  }
+  if (
+    !isStringArray(languages) ||
+    languages.length === 0 ||
+    languages.some((entry) => entry.trim().length === 0)
+  ) {
+    issues.push(issue("missing_languages", `${path}.languages`, "at least one language"));
+    return null;
+  }
+  const dates: Record<"windowStart" | "windowEnd", string | null> = {
+    windowStart: null,
+    windowEnd: null,
+  };
+  for (const key of ["windowStart", "windowEnd"] as const) {
+    const value = row[key];
+    if (value === null || value === undefined) continue;
+    if (!isNonEmptyString(value) || !Number.isFinite(Date.parse(value))) {
+      issues.push(issue("invalid_window", `${path}.${key}`, `not an ISO date: ${String(value)}`));
+      return null;
+    }
+    dates[key] = value;
+  }
+  if (
+    dates.windowStart !== null &&
+    dates.windowEnd !== null &&
+    Date.parse(dates.windowEnd) <= Date.parse(dates.windowStart)
+  ) {
+    issues.push(issue("invalid_window", path, "the window ends before it starts"));
+    return null;
+  }
+  return {
+    territories,
+    languages,
+    windowStart: dates.windowStart,
+    windowEnd: dates.windowEnd,
   };
 }
 
@@ -230,6 +305,30 @@ export function parseSeries(raw: unknown, issues: ValidationIssue[] = []): Serie
     `series.${String(row.id)}.localizedMetadata`,
     issues,
   );
+  const rights = parseRights(row.rights, `series.${String(row.id)}.rights`, issues);
+  if (!isNonEmptyString(row.producerId)) {
+    issues.push(
+      issue(
+        "missing_producer",
+        `series.${String(row.id)}.producerId`,
+        "producer of record required: the statement would have nobody to pay",
+      ),
+    );
+    throw new Error("Invalid series: missing producer of record");
+  }
+  if (typeof row.socialClipsAllowed !== "boolean") {
+    issues.push(
+      issue(
+        "missing_social_clips_permission",
+        `series.${String(row.id)}.socialClipsAllowed`,
+        "clips are allowed only when the producer said so: true or false, never unset",
+      ),
+    );
+    throw new Error("Invalid series: social clip permission not declared");
+  }
+  if (!rights) {
+    throw new Error("Invalid series: rights missing or malformed");
+  }
   if (
     !isNonEmptyString(row.id) ||
     !isNonEmptyString(row.title) ||
@@ -259,6 +358,9 @@ export function parseSeries(raw: unknown, issues: ValidationIssue[] = []): Serie
     status,
     defaultLocale: row.defaultLocale,
     localizedMetadata,
+    producerId: row.producerId,
+    socialClipsAllowed: row.socialClipsAllowed,
+    rights,
   };
 }
 
@@ -464,9 +566,19 @@ export function validateCatalog(raw: unknown): CatalogValidationResult {
   return { ok: true, catalog: { series, items } };
 }
 
-/** Consumer feed catalog: published series + published, playable items only. */
+/**
+ * Consumer feed catalog: published series inside their rights window, plus
+ * their published, playable items.
+ *
+ * The window is checked here and not only at ingest, because a static export
+ * is built once and served for days: a licence that closes in the meantime
+ * must take the series out of the feed at the next build, not at the next
+ * time somebody remembers (F8).
+ */
 export function toPublishedCatalog(catalog: FeedCatalog, now = Date.now()): FeedCatalog {
-  const publishedSeries = catalog.series.filter((s) => s.status === "published");
+  const publishedSeries = catalog.series.filter(
+    (s) => s.status === "published" && isSeriesWindowOpen(s.rights, now),
+  );
   const seriesIds = new Set(publishedSeries.map((s) => s.id));
   const items = catalog.items.filter((item) => {
     if (item.status !== "published") return false;

@@ -11,12 +11,21 @@ export type {
   LocalizedStrings,
   LocalizedMetadata,
   PreloadHint,
+  SeriesRights,
 } from "./model/types";
 export {
   VERTICAL_ASPECT_MAX,
   VERTICAL_ASPECT_MIN,
   ALLOWED_VIDEO_MIME,
+  isSeriesWindowOpen,
 } from "./model/types";
+export type {
+  EpisodeManifest,
+  ManifestCaptionTrack,
+  SeriesManifest,
+} from "./content/seriesManifest";
+export { SERIES_MANIFEST_VERSION, catalogFromManifests } from "./content/seriesManifest";
+export { SERIES_MANIFESTS } from "./data/generated";
 export {
   parseSeries,
   parseContentItem,
@@ -59,6 +68,7 @@ export {
 
 export {
   FEED_CATALOG_PAYLOAD_VERSION,
+  PRODUCER_WITHHELD,
   firstFramePayload,
   fromFeedCatalogPayload,
   toFeedCatalogPayload,
@@ -67,6 +77,7 @@ export type {
   FeedCatalogPayload,
   FeedItemCopy,
   FeedItemPayload,
+  FeedSeriesPayload,
 } from "./catalog/feedCatalogPayload";
 
 export {
@@ -182,10 +193,14 @@ export type {
 export {
   WATCH_SAMPLE_JITTER_TOLERANCE_MS,
   computeWatchedMinutes,
+  periodOf,
   watchProgressRecordsFromEnvelopes,
+  watchedMsBySeriesFor,
 } from "./partners/watchedMinutes";
 export type {
   EnvelopeConversion,
+  MarketPeriodSelection,
+  MarketPeriodWatchTime,
   WatchProgressRecord,
   WatchedMinutesResult,
   WatchedMinutesRow,

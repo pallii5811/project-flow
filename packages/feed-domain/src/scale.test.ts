@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   FEED_EXTEND_WITHIN,
   FEED_PAGE_SIZE,
+  PRODUCER_WITHHELD,
   STRESS_EPISODES_PER_SERIES,
   applyRecommendedPage,
   createDeterministicFeedSource,
@@ -86,8 +87,39 @@ describe("feed catalog payload", () => {
       .getOrderedItems()
       .map(withoutDescriptions);
     expect(restored.items).toEqual(expected);
-    expect(restored.series).toEqual(catalog.series.map(withoutDescriptions));
+    // Everything the feed shows survives; licence terms and the producer do not travel.
+    expect(
+      restored.series.map(({ producerId: _p, socialClipsAllowed: _s, rights: _r, ...shown }) => shown),
+    ).toEqual(
+      catalog.series
+        .map(withoutDescriptions)
+        .map(({ producerId: _p, socialClipsAllowed: _s, rights: _r, ...shown }) => shown),
+    );
     expect(createDeterministicFeedSource(restored).getOrderedItems()).toHaveLength(125);
+  });
+
+  it("never sends licence terms or the producer of record to the browser", () => {
+    const closes = "2099-01-01T00:00:00.000Z";
+    const withTerms: FeedCatalog = {
+      ...catalog,
+      series: catalog.series.map((entry) => ({
+        ...entry,
+        producerId: "prod_secret_studio",
+        rights: { ...entry.rights, languages: ["en", "es", "ko"], windowEnd: closes },
+      })),
+    };
+    const json = JSON.stringify(toFeedCatalogPayload(withTerms));
+    for (const secret of ["prod_secret_studio", "producerId", "territories", "socialClipsAllowed", '"ko"']) {
+      expect(json).not.toContain(secret);
+    }
+    // The one licence fact the client acts on still arrives: when the window closes.
+    const restored = fromFeedCatalogPayload(JSON.parse(json));
+    expect(restored.series.every((entry) => entry.rights.windowEnd === closes)).toBe(true);
+    expect(restored.series.every((entry) => entry.producerId === PRODUCER_WITHHELD)).toBe(true);
+    // A window that has closed takes the series out on the client too.
+    expect(
+      createDeterministicFeedSource(restored, { now: Date.parse(closes) + 1 }).getOrderedItems(),
+    ).toHaveLength(0);
   });
 
   it("never carries descriptions, which the feed does not show", () => {

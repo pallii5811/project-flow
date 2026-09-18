@@ -56,7 +56,7 @@ no sale of viewer data.
 | Window             | "Second life": series that already earned on paid apps return here free. First-run titles welcome when the producer wants |
 | Localization       | Subtitles and dubbing paid from revenue, never from owner cash. At launch we use the languages the producer already has   |
 | Reporting          | Monthly statement per series: watched minutes, markets, revenue, share. Totals must tie out to the cent                   |
-| Minimum guarantees | None while there is no revenue. Later only from accumulated revenue, only for proven titles                               |
+| Minimum guarantees | **None. Revenue share only**, with no "later" attached — the same thing the producer page promises                        |
 
 Watched minutes are computed by `computeWatchedMinutes` and statements by
 `buildProducerStatement` in `packages/feed-domain/src/partners/`.

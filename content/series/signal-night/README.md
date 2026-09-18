@@ -1,25 +1,38 @@
 # Signal Night — cleared vertical stand-in pack
 
-Original assets generated in this repository with ffmpeg (color beds and simple overlays).
-Not third-party drama. Not licensed IP. Never present it as a commercial title.
+Original assets generated in this repository with ffmpeg (moving colour beds and an audio
+bed). Not third-party drama. Not licensed IP. Never present it as a commercial title.
 
-Purpose: prove the whole path real asset → validated content → feed → adaptive playback →
-WebVTT → continue, before licensed series arrive.
+Purpose: prove the whole path studio delivery → quality gate → adaptive playback → WebVTT →
+feed → continue, before licensed series arrive.
 
-| What                       | Where                                                         |
-| -------------------------- | ------------------------------------------------------------- |
-| Masters (720×1280, 10 s)   | `content/series/signal-night/masters/` — not published        |
-| Adaptive HLS, posters, VTT | `apps/web/public/content/series/signal-night/`                |
-| Catalog entries            | `packages/feed-domain/src/data/catalog.ts` (`LAUNCH_CATALOG`) |
+| What                            | Where                                                             |
+| ------------------------------- | ------------------------------------------------------------------ |
+| Delivery (rights, episode list) | `content/series/signal-night/series.json`                         |
+| Masters (720×1280, 10 s)        | `content/series/signal-night/masters/` — not published            |
+| Subtitles as delivered          | `content/series/signal-night/captions/`                           |
+| Adaptive HLS, posters, cards    | `apps/web/public/content/series/signal-night/`                    |
+| Series manifest the app reads   | `packages/feed-domain/src/data/generated/signal-night.ts`         |
 
-## Re-packaging
+Two things about this pack are deliberate, because the gate is measured on them:
 
-The masters are below the 1080×1920 curation gate on purpose (stand-ins), hence the flag:
+- the picture is bright and moving, so a black or frozen opening is a real failure and not
+  the normal case;
+- the five episodes are delivered at five different loudnesses (−27.7 to −44.6 LUFS), the
+  way five studios would deliver them, so the normalisation has something to correct. All
+  five are published at −16.0 LUFS.
+
+## Commands
 
 ```bash
-node scripts/package-episode.mjs content/series/signal-night/masters/episode-1.mp4 apps/web/public/content/series/signal-night/hls/episode-1 --allow-below-1080p
+node scripts/make-standin-masters.mjs   # regenerate the masters (video + audio bed)
+node scripts/ingest-series.mjs signal-night
 ```
 
-Each output folder carries a `manifest.json` with the measured duration, renditions, bytes
-and real bitrates. A licensed series is packaged the same way without the flag, and its HLS
-goes to zero-egress storage (Cloudflare R2), not to git.
+Ingest re-encodes only what changed. The masters are below the 1080×1920 curation gate on
+purpose, which is why `series.json` declares `allowBelow1080p` and a 8–15 s episode range; a
+licensed series declares neither. Everything else — the gate, what to do when it refuses,
+and what a studio must send — is in [`docs/content-operations.md`](../../../docs/content-operations.md).
+
+A licensed series is packaged the same way, and its HLS goes to zero-egress storage
+(Cloudflare R2), not to git.

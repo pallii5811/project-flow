@@ -9,7 +9,7 @@
  * not proof of a correct artifact.
  */
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -94,7 +94,73 @@ function metaContent(html, key) {
   return [...html.matchAll(pattern)].map((match) => match[1]);
 }
 
+/**
+ * Every asset the catalog promises must be a file in the export (CP-1, CP-3).
+ * A caption marked "ready" whose file was never copied shows no text, and the
+ * catalog would still say it is there.
+ */
+function checkCatalogAssets(feedCatalog) {
+  let checked = 0;
+  const missing = [];
+  const seen = new Set();
+  const require = (item, kind, url) => {
+    if (typeof url !== "string" || url.length === 0) {
+      missing.push(`${item.id}: ${kind} has no URL`);
+      return;
+    }
+    // The stress catalog distinguishes posters with a query string.
+    const path = url.split("?")[0];
+    if (!path.startsWith("/")) {
+      missing.push(`${item.id}: ${kind} is not a site path: "${url}"`);
+      return;
+    }
+    if (seen.has(path)) return;
+    seen.add(path);
+    checked += 1;
+    try {
+      statSync(join(exportDir, path.slice(1)));
+    } catch {
+      missing.push(`${item.id}: ${kind} ${path} is not in the export`);
+    }
+  };
+  for (const item of feedCatalog.items) {
+    const playback = item.playback ?? {};
+    require(item, "video", playback.reference);
+    require(item, "poster", playback.posterReference);
+    require(item, "share card", playback.shareCardReference);
+    for (const track of item.captions ?? []) {
+      if (track.status === "ready") require(item, `captions [${track.language}]`, track.url);
+    }
+  }
+  for (const failure of missing) failures.push(failure);
+  console.error(`deploy-checks: ${checked} catalog assets resolved in the export`);
+}
+
+/**
+ * Each packaged episode keeps a record next to its renditions (manifest.json:
+ * the master's file name and hash, the ffmpeg build, the gate options). Ingest
+ * needs it to resume; a viewer does not, so it never leaves in the export.
+ */
+function stripPackagingRecords() {
+  const seriesRoot = join(exportDir, "content", "series");
+  if (!existsSync(seriesRoot)) return;
+  let removed = 0;
+  for (const series of readdirSync(seriesRoot)) {
+    const hls = join(seriesRoot, series, "hls");
+    if (!existsSync(hls)) continue;
+    for (const episode of readdirSync(hls)) {
+      const record = join(hls, episode, "manifest.json");
+      if (existsSync(record)) {
+        rmSync(record);
+        removed += 1;
+      }
+    }
+  }
+  console.error(`deploy-checks: ${removed} packaging records kept out of the export`);
+}
+
 function checkExport() {
+  stripPackagingRecords();
   const site = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") ?? "";
   if (!site) failures.push("NEXT_PUBLIC_SITE_URL is not set: cannot verify preview URLs");
 
@@ -130,8 +196,22 @@ function checkExport() {
         }
       }
     }
-    if (watchPages.includes(file) && metaContent(html, "og:image").length === 0) {
-      failures.push(`${name} has no og:image: shared links would show no picture`);
+    if (watchPages.includes(file)) {
+      if (metaContent(html, "og:image").length === 0) {
+        failures.push(`${name} has no og:image: shared links would show no picture`);
+      }
+      // VIR-4: a wide card is cropped to about 1.91:1 by the crawlers. A
+      // preview that does not declare a landscape size is a portrait poster
+      // about to be cut to a thin band.
+      const width = Number(metaContent(html, "og:image:width")[0]);
+      const height = Number(metaContent(html, "og:image:height")[0]);
+      if (!Number.isFinite(width) || !Number.isFinite(height)) {
+        failures.push(`${name} does not declare og:image:width/height`);
+      } else if (width <= height) {
+        failures.push(
+          `${name} preview is ${width}x${height}: a portrait card is cropped to a band on X and Facebook`,
+        );
+      }
     }
   }
 
@@ -139,7 +219,12 @@ function checkExport() {
   // swipe past the second episode.
   let feedCatalog = null;
   try {
-    feedCatalog = JSON.parse(readFileSync(join(exportDir, "catalog/feed.json"), "utf8"));
+    const text = readFileSync(join(exportDir, "catalog/feed.json"), "utf8");
+    feedCatalog = JSON.parse(text);
+    // Licence terms and the producer of record stay on the build side.
+    for (const field of ["producerId", "territories", "socialClipsAllowed"]) {
+      if (text.includes(`"${field}"`)) failures.push(`catalog/feed.json carries "${field}"`);
+    }
   } catch {
     failures.push("export has no readable catalog/feed.json");
   }
@@ -148,6 +233,8 @@ function checkExport() {
       failures.push("catalog/feed.json lists no episodes");
     } else if (feedCatalog.items.some((item) => String(item.id).startsWith("item_stress_"))) {
       failures.push("catalog/feed.json contains the stress catalog");
+    } else {
+      checkCatalogAssets(feedCatalog);
     }
   }
 

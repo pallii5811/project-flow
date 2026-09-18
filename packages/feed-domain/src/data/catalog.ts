@@ -1,9 +1,19 @@
 /**
  * LAUNCH CATALOG (L1) — web source of truth.
  *
+ * The published series are NOT typed here any more: they are built from the
+ * series manifests under `data/generated/`, which `scripts/ingest-series.mjs`
+ * writes from the packaged episodes (CP-1). Durations, poster and caption
+ * URLs, rights and the producer of record therefore describe files that exist
+ * and were measured, instead of numbers somebody kept in step by hand.
+ *
  * Assets: cleared original vertical stand-ins under `/content/series/signal-night/`.
- * Generated in-repo (ffmpeg color beds). NOT licensed short drama.
- * Do not present as a commercial title.
+ * Generated in-repo (ffmpeg colour beds and an audio bed). NOT licensed short
+ * drama. Do not present as a commercial title.
+ *
+ * What stays hand-written below are the hostile fixtures — a draft series, an
+ * expired episode, an unpublished one — because they are tests of the feed's
+ * refusals, not content.
  *
  * Mobile keeps a separate legacy fixture catalog and is not launch-critical.
  */
@@ -13,67 +23,36 @@ import type {
   LocalizedMetadata,
   PlaybackDescriptor,
   Series,
+  SeriesRights,
 } from "../model/types";
 import { toPublishedCatalog, validateCatalog } from "../model/validate";
+import { catalogFromManifests } from "../content/seriesManifest";
+import { SERIES_MANIFESTS } from "./generated";
 
-const PACK = "/content/series/signal-night";
-const W = 720;
-const H = 1280;
-const ASPECT = W / H;
-/** Measured by scripts/package-episode.mjs (hls/episode-N/manifest.json). */
-const DURATION_MS = 10_000;
+/** Everything the manifests describe: series, episodes, rights, captions. */
+const ingested = catalogFromManifests(SERIES_MANIFESTS);
 
-/**
- * Adaptive HLS produced by scripts/package-episode.mjs from the masters in
- * content/series/signal-night/masters/.
- */
-function playbackFor(
-  episodeFile: string,
-  expiresAt: string | null = null,
-): PlaybackDescriptor {
-  return {
-    provider: "hls",
-    reference: `${PACK}/hls/${episodeFile}/master.m3u8`,
-    mimeType: "application/vnd.apple.mpegurl",
-    durationMs: DURATION_MS,
-    width: W,
-    height: H,
-    aspectRatio: ASPECT,
-    posterReference: `${PACK}/posters/${episodeFile}.jpg`,
-    expiresAt,
-    preloadHint: "metadata",
-  };
+const signalNight = ingested.series.find((entry) => entry.seriesSlug === "signal-night");
+if (!signalNight) {
+  throw new Error(
+    "No signal-night manifest: run `node scripts/ingest-series.mjs` before building",
+  );
 }
+const found = ingested.items.find((item) => item.seriesId === signalNight.id);
+if (!found) {
+  throw new Error("The signal-night manifest has no episodes");
+}
+const firstEpisode: ContentItem = found;
 
 function enMeta(title: string, hook: string, description: string): LocalizedMetadata {
-  return {
-    en: { title, hook, description },
-    es: {
-      title,
-      hook: hook.replace(/\n/g, " "),
-      description: "Paquete de prueba vertical liberado (no es drama con licencia).",
-    },
-    "pt-BR": {
-      title,
-      hook: hook.replace(/\n/g, " "),
-      description: "Pacote vertical liberado para testes (não é drama licenciado).",
-    },
-  };
+  return { en: { title, hook, description } };
 }
 
-const SERIES_SIGNAL: Series = {
-  id: "series_signal",
-  seriesSlug: "signal-night",
-  title: "Signal Night",
-  status: "published",
-  coverUrl: `${PACK}/posters/episode-1.jpg`,
-  totalEpisodes: 5,
-  defaultLocale: "en",
-  localizedMetadata: enMeta(
-    "Signal Night",
-    "A cleared vertical stand-in pack.\nNot licensed short drama.",
-    "Original generative vertical fixtures for PROJECT FLOW launch playback validation.",
-  ),
+const PROBE_RIGHTS: SeriesRights = {
+  territories: ["WORLD"],
+  languages: ["en"],
+  windowStart: null,
+  windowEnd: null,
 };
 
 /** Draft series — must never appear in consumer feed. */
@@ -82,50 +61,33 @@ const SERIES_DRAFT: Series = {
   seriesSlug: "draft-probe",
   title: "Draft Probe",
   status: "draft",
-  coverUrl: `${PACK}/posters/episode-1.jpg`,
+  coverUrl: firstEpisode.thumbnailUrl,
   totalEpisodes: 1,
   defaultLocale: "en",
   localizedMetadata: enMeta("Draft Probe", "Should not ship.", "Draft only."),
+  producerId: "prod_standin_inhouse",
+  socialClipsAllowed: false,
+  rights: PROBE_RIGHTS,
 };
 
-function captionsFor(episodeFile: string, includeEs: boolean): ContentItem["captions"] {
-  const tracks: ContentItem["captions"] = [
-    {
-      language: "en",
-      url: `${PACK}/captions/${episodeFile}.en.vtt`,
-      kind: "captions",
-      default: true,
-      status: "ready",
-    },
-  ];
-  if (includeEs) {
-    tracks.push({
-      language: "es",
-      url: `${PACK}/captions/${episodeFile}.es.vtt`,
-      kind: "subtitles",
-      default: false,
-      status: "ready",
-    });
-  }
-  return tracks;
+/** A probe reuses the first episode's real assets: only its status is hostile. */
+function probePlayback(expiresAt: string | null = null): PlaybackDescriptor {
+  return { ...firstEpisode.playback, expiresAt };
 }
 
-function makeItem(opts: {
+function makeProbe(opts: {
   id: string;
   series: Series;
   episodeId: string;
   episodeNumber: number;
   episodeSlug: string;
-  episodeFile: string;
   title: string;
   hook: string;
   order: number;
   status: ContentItem["status"];
   expiresAt?: string | null;
-  includeEs?: boolean;
 }): ContentItem {
-  const pb = playbackFor(opts.episodeFile, opts.expiresAt ?? null);
-  const captions = captionsFor(opts.episodeFile, opts.includeEs === true);
+  const playback = probePlayback(opts.expiresAt ?? null);
   return {
     id: opts.id,
     seriesId: opts.series.id,
@@ -136,12 +98,12 @@ function makeItem(opts: {
     title: opts.title,
     seriesTitle: opts.series.title,
     hook: opts.hook,
-    thumbnailUrl: pb.posterReference,
-    videoUrl: pb.reference,
-    playback: pb,
-    captions,
-    captionsAvailable: captions.some((t) => t.status === "ready"),
-    durationMs: pb.durationMs,
+    thumbnailUrl: playback.posterReference,
+    videoUrl: playback.reference,
+    playback,
+    captions: firstEpisode.captions,
+    captionsAvailable: firstEpisode.captionsAvailable,
+    durationMs: playback.durationMs,
     language: "en",
     defaultLocale: "en",
     localizedMetadata: enMeta(
@@ -150,72 +112,44 @@ function makeItem(opts: {
       `${opts.series.title} · ${opts.title}`,
     ),
     order: opts.order,
-    genres: ["thriller", "drama"],
-    tropes: ["mystery", "night"],
-    editorialPriority: 100 - opts.order,
-    popularityScore: 90 - opts.order,
+    genres: firstEpisode.genres,
+    tropes: firstEpisode.tropes,
+    editorialPriority: 0,
+    popularityScore: 0,
   };
 }
 
-const HOOKS: Array<{ title: string; hook: string }> = [
-  { title: "The Signal", hook: "Something is wrong with the night.\nDo not answer." },
-  { title: "After Dark", hook: "The frequency finds you.\nYou do not find it." },
-  { title: "No Reply", hook: "She waited three seconds too long." },
-  { title: "Last Frame", hook: "The recording ends where the story starts." },
-  { title: "Stay Quiet", hook: "If you can hear this,\nyou are already in it." },
-];
-
-const publishedItems: ContentItem[] = HOOKS.map((entry, index) => {
-  const n = index + 1;
-  return makeItem({
-    id: `item_signal_${n}`,
-    series: SERIES_SIGNAL,
-    episodeId: `ep_signal_${n}`,
-    episodeNumber: n,
-    episodeSlug: `episode-${n}`,
-    episodeFile: `episode-${n}`,
-    title: entry.title,
-    hook: entry.hook,
-    order: index,
-    status: "published",
-    includeEs: n === 1,
-  });
-});
-
 /** Hostile fixtures for validation / deep-link tests — never published into feed. */
 const probeItems: ContentItem[] = [
-  makeItem({
+  makeProbe({
     id: "item_draft_probe_1",
     series: SERIES_DRAFT,
     episodeId: "ep_draft_1",
     episodeNumber: 1,
     episodeSlug: "episode-1",
-    episodeFile: "episode-1",
     title: "Draft Episode",
     hook: "Draft — excluded.",
     order: 100,
     status: "draft",
   }),
-  makeItem({
+  makeProbe({
     id: "item_signal_expired_probe",
-    series: SERIES_SIGNAL,
+    series: signalNight,
     episodeId: "ep_signal_expired_probe",
     episodeNumber: 90,
     episodeSlug: "expired-probe",
-    episodeFile: "episode-1",
     title: "Expired Episode",
     hook: "Expired — excluded.",
     order: 101,
     status: "expired",
     expiresAt: "2020-01-01T00:00:00.000Z",
   }),
-  makeItem({
+  makeProbe({
     id: "item_signal_unpublished_probe",
-    series: SERIES_SIGNAL,
+    series: signalNight,
     episodeId: "ep_signal_unpublished_probe",
     episodeNumber: 91,
     episodeSlug: "unpublished-probe",
-    episodeFile: "episode-1",
     title: "Unpublished Episode",
     hook: "Unpublished — excluded.",
     order: 102,
@@ -225,8 +159,8 @@ const probeItems: ContentItem[] = [
 
 /** Full seed including probes. Prefer getLaunchFeedCatalog for consumers. */
 export const RAW_LAUNCH_SEED: FeedCatalog = {
-  series: [SERIES_SIGNAL, SERIES_DRAFT],
-  items: [...publishedItems, ...probeItems],
+  series: [...ingested.series, SERIES_DRAFT],
+  items: [...ingested.items, ...probeItems],
 };
 
 const validated = validateCatalog(RAW_LAUNCH_SEED);
@@ -239,7 +173,7 @@ if (!validated.ok) {
 /** Full validated seed (includes non-published probes for tests). */
 export const LAUNCH_CATALOG: FeedCatalog = validated.catalog;
 
-/** Consumer feed catalog — published only. */
+/** Consumer feed catalog — published only, and inside its rights window. */
 export function getLaunchFeedCatalog(now = Date.now()): FeedCatalog {
   return toPublishedCatalog(LAUNCH_CATALOG, now);
 }

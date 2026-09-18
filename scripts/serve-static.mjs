@@ -90,14 +90,27 @@ const server = createServer((request, response) => {
       "content-length": end - start + 1,
     });
     if (request.method === "HEAD") return response.end();
-    createReadStream(file.path, { start, end }).pipe(response);
+    send(createReadStream(file.path, { start, end }), response);
     return;
   }
 
   response.writeHead(status, { ...headers, "content-length": file.size });
   if (request.method === "HEAD") return response.end();
-  createReadStream(file.path).pipe(response);
+  send(createReadStream(file.path), response);
 });
+
+/**
+ * A viewer who swipes away mid-segment aborts the request. An unhandled
+ * stream error would then take the whole server down, which shows up minutes
+ * later as a page that will not load and hides its own cause.
+ */
+function send(stream, response) {
+  stream.on("error", () => response.destroy());
+  response.on("close", () => stream.destroy());
+  stream.pipe(response);
+}
+
+server.on("clientError", (_error, socket) => socket.destroy());
 
 server.listen(port, () => {
   console.error(`serve-static: ${root} on http://localhost:${port}`);

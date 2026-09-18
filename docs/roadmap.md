@@ -15,10 +15,24 @@ Business shape and rules: `docs/business-model.md`, `docs/standard.md`.
 | F5   | Share previews with absolute URLs + static export for Cloudflare Pages + build-time guard                  | DONE   |
 | F6   | Adaptive video: HLS packaging script + player + current/next-only preload                                  | DONE   |
 | F7   | Event collector (Workers + D1) — needs the owner's Cloudflare account                                      | todo   |
-| F8   | Rights metadata per series: territories, languages, window, producer of record                             | todo   |
+| F8   | Rights metadata per series: territories, languages, window, producer of record                             | DONE   |
+| F9   | Content pipeline: one command from a studio delivery to a live series, with a gate that measures (`docs/content-operations.md`) | DONE |
 | C1   | Content gate: 45–60 English series in 3 clusters + 12–20 new per month signed (`docs/content-strategy.md`) | todo   |
 
 **Stop.** No public launch before the content gate C1 is met (owner decision 2026-09-16). Closed beta first, with the same catalog and zero ads, to measure D1/D7, series completion and catalog exhaustion. F5–F8 must be live for the beta.
+
+F8 detail (2026-09-18): rights live on the series itself — `SeriesRights` in
+`packages/feed-domain/src/model/types.ts` (territories, languages, `windowStart`,
+`windowEnd`), plus `producerId` and `socialClipsAllowed`. They are delivered in
+`content/series/<slug>/series.json`, carried into the generated manifest, required by
+`validateCatalog`, and enforced by `toPublishedCatalog`, which does not list a series
+outside its window. Ingest enforces the rest: a caption or spoken language outside
+`rights.languages` is refused, and so is any territory list other than `["WORLD"]`, because
+the static export cannot restrict by country — a title licensed for part of the world
+cannot be listed until geo-restriction exists. Licence terms and the producer of record
+stay out of the public `catalog/feed.json`. The remaining limit is that the site is a
+static export: a window that closes removes the title at the next build, not at the
+minute (the player also checks the window end at each activation).
 
 ## Phase 1 — Foundation (STOP & TEST)
 

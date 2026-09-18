@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "seriesId": "series_signal",
+  "seriesSlug": "signal-night",
+  "title": "Signal Night",
+  "status": "published",
+  "defaultLocale": "en",
+  "producerId": "prod_standin_inhouse",
+  "producerOfRecord": "PROJECT FLOW — cleared stand-in pack, not a licensed title",
+  "socialClipsAllowed": false,
+  "allowBelow1080p": true,
+  "episodeDurationMs": { "min": 8000, "max": 15000 },
+  "genres": ["thriller", "drama"],
+  "tropes": ["mystery", "night"],
+  "rights": {
+    "territories": ["WORLD"],
+    "languages": ["en", "es"],
+    "windowStart": "2026-01-01T00:00:00.000Z",
+    "windowEnd": null
+  },
+  "localizedMetadata": {
+    "en": {
+      "title": "Signal Night",
+      "hook": "A cleared vertical stand-in pack.\nNot licensed short drama.",
+      "description": "Original generative vertical fixtures for PROJECT FLOW launch playback validation."
+    },
+    "es": {
+      "title": "Signal Night",
+      "hook": "A cleared vertical stand-in pack. Not licensed short drama.",
+      "description": "Paquete de prueba vertical liberado (no es drama con licencia)."
+    },
+    "pt-BR": {
+      "title": "Signal Night",
+      "hook": "A cleared vertical stand-in pack. Not licensed short drama.",
+      "description": "Pacote vertical liberado para testes (não é drama licenciado)."
+    }
+  },
+  "episodes": [
+    {
+      "episodeNumber": 1,
+      "master": "masters/episode-1.mp4",
+      "title": "The Signal",
+      "hook": "Something is wrong with the night.\nDo not answer.",
+      "captions": [
+        { "language": "en", "file": "captions/episode-1.en.vtt", "kind": "captions", "default": true },
+        { "language": "es", "file": "captions/episode-1.es.vtt", "kind": "subtitles", "default": false }
+      ]
+    },
+    {
+      "episodeNumber": 2,
+      "master": "masters/episode-2.mp4",
+      "title": "After Dark",
+      "hook": "The frequency finds you.\nYou do not find it.",
+      "captions": [
+        { "language": "en", "file": "captions/episode-2.en.vtt", "kind": "captions", "default": true }
+      ]
+    },
+    {
+      "episodeNumber": 3,
+      "master": "masters/episode-3.mp4",
+      "title": "No Reply",
+      "hook": "She waited three seconds too long.",
+      "captions": [
+        { "language": "en", "file": "captions/episode-3.en.vtt", "kind": "captions", "default": true }
+      ]
+    },
+    {
+      "episodeNumber": 4,
+      "master": "masters/episode-4.mp4",
+      "title": "Last Frame",
+      "hook": "The recording ends where the story starts.",
+      "captions": [
+        { "language": "en", "file": "captions/episode-4.en.vtt", "kind": "captions", "default": true }
+      ]
+    },
+    {
+      "episodeNumber": 5,
+      "master": "masters/episode-5.mp4",
+      "title": "Stay Quiet",
+      "hook": "If you can hear this,\nyou are already in it.",
+      "captions": [
+        { "language": "en", "file": "captions/episode-5.en.vtt", "kind": "captions", "default": true }
+      ]
+    }
+  ]
+}

@@ -20,6 +20,10 @@ type WatchPageProps = {
   params: Promise<WatchParams>;
 };
 
+/** The size scripts/ingest-series.mjs writes; declared so crawlers can lay it out. */
+const SHARE_CARD_WIDTH = 1200;
+const SHARE_CARD_HEIGHT = 630;
+
 /**
  * Static export: one HTML file per published episode, so a shared link is a
  * plain file on the CDN. Publication and expiry are evaluated at BUILD time —
@@ -59,7 +63,18 @@ export async function generateMetadata({ params }: WatchPageProps): Promise<Meta
       title: item.seriesTitle,
       description,
       url: path,
-      images: [{ url: item.thumbnailUrl }],
+      // VIR-4: the preview is the only picture the recipient sees before
+      // tapping, and crawlers crop a wide card to about 1.91:1. The 9:16
+      // poster would be cut to a thin centre band, so the card is the
+      // landscape image ingest builds from the same frame.
+      images: [
+        {
+          url: item.playback.shareCardReference,
+          width: SHARE_CARD_WIDTH,
+          height: SHARE_CARD_HEIGHT,
+          alt: `${item.seriesTitle} — episode ${item.episodeNumber}`,
+        },
+      ],
     },
   };
 }
