@@ -1,7 +1,18 @@
 # What this is: the owner sends a studio's link to this workflow from his phone.
-# The video is downloaded HERE, on a GitHub runner, never on his computer: it is
-# cut into episodes, packaged, and uploaded to Cloudflare R2. Only small files
-# come back — a manifest committed to master, and contact sheets to look at.
+# The video is downloaded on a machine that is not his — never on his computer:
+# it is cut into episodes, packaged, and uploaded to Cloudflare R2. Only small
+# files come back — a manifest committed to master, and contact sheets to look at.
+#
+# Which machine does the work is the `runner` input:
+#
+#   scaleway (the default)  this job makes a 16-core machine at Scaleway for
+#                           this one series, runs the SAME ingest on it, and
+#                           deletes it. The job itself spends a few free
+#                           minutes; the encoding is about an hour and costs
+#                           well under a euro (docs/cloud-ingest.md).
+#   github                  everything happens here, on two free threads. It
+#                           costs no money and most of a month's free minutes.
+#
 # The owner's guide is docs/cloud-ingest.md; the design is docs/decisions.md.
 name: ingest from link
 
@@ -24,6 +35,14 @@ on:
         options:
           - propose-cuts
           - publish
+      runner:
+        description: "scaleway = a machine made for this series, about an hour and under a euro. github = free but slow."
+        required: true
+        default: scaleway
+        type: choice
+        options:
+          - scaleway
+          - github
       continuation:
         description: "Leave at 0. A run that could not finish sets it to continue itself."
         required: false
@@ -46,7 +65,9 @@ jobs:
     timeout-minutes: 350
     env:
       # Pinned: the same ffmpeg every time, checked against the hash its author
-      # published. A build of the month is kept for two years (BtbN/FFmpeg-Builds).
+      # published. The same URL and hash are in scripts/lib/pinned-tools.mjs,
+      # which is what the Scaleway machine installs — test/scaleway.test.ts
+      # refuses to let the two drift.
       FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-02-28-12-59/ffmpeg-n8.0.1-66-g27b8d1a017-linux64-gpl-8.0.tar.xz
       FFMPEG_SHA256: 26d2ecd0cefba99f9d1ea92252a3a4f743a58df4c1c3cf9f8bbaaa40b1fca5b0
       # Never interpolated into a shell line: what the owner typed is data.
@@ -65,12 +86,14 @@ jobs:
       - name: Make room on the disk
         # A runner has about 14 GB free; a 90-minute delivery and the episodes
         # cut from it need most of it. These are toolchains nothing here uses.
+        if: inputs.runner == 'github'
         run: |
           df -h / | tail -1
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
           df -h / | tail -1
 
       - name: Install the pinned ffmpeg
+        if: inputs.runner == 'github'
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
@@ -80,9 +103,11 @@ jobs:
           echo "$RUNNER_TEMP/ffmpeg/bin" >> "$GITHUB_PATH"
 
       - name: Check this ffmpeg can do the work
+        if: inputs.runner == 'github'
         run: node scripts/check-ffmpeg.mjs
 
       - name: Download the delivery
+        if: inputs.runner == 'github'
         run: |
           set -euf -o pipefail
           node scripts/fetch-delivery.mjs --out "$RUNNER_TEMP/delivery" $LINKS
@@ -96,8 +121,38 @@ jobs:
           restore-keys: |
             ingest-records-${{ inputs.slug }}-
 
+      # --- the machine made for this series --------------------------------
+      - name: Do the work on a machine made for this series, and delete it
+        if: inputs.runner == 'scaleway'
+        env:
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_ZONE: ${{ secrets.SCW_ZONE }}
+          MEDIA_BASE_URL: ${{ secrets.MEDIA_BASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set +e
+          node scripts/run-on-scaleway.mjs "$SLUG" \
+            --links "$LINKS" \
+            --mode "$MODE" \
+            --commit "$GITHUB_SHA" \
+            --budget-minutes 330 \
+            --max-parallel 1
+          code=$?
+          set -e
+          echo "INGEST_EXIT=$code" >> "$GITHUB_ENV"
+          # 2 is the budget wall: the machine was destroyed, the series was not
+          # finished, and that is a failure of the run, not of the series.
+          if [ "$code" != "0" ] && [ "$code" != "3" ]; then exit "$code"; fi
+
+      # --- or here, on two free threads ------------------------------------
       - name: Propose where the episodes are
-        if: inputs.mode == 'propose-cuts'
+        if: inputs.mode == 'propose-cuts' && inputs.runner == 'github'
         run: |
           set -euo pipefail
           node scripts/split-compilation.mjs propose "$SLUG" \
@@ -105,7 +160,7 @@ jobs:
             --out ".split-work/$SLUG"
 
       - name: Package the episodes and put them on the media store
-        if: inputs.mode == 'publish'
+        if: inputs.mode == 'publish' && inputs.runner == 'github'
         env:
           MEDIA_BASE_URL: ${{ secrets.MEDIA_BASE_URL }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -157,6 +212,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CONTINUATION: ${{ inputs.continuation }}
+          RUNNER_CHOICE: ${{ inputs.runner }}
         run: |
           set -euo pipefail
           next=$(( CONTINUATION + 1 ))
@@ -166,7 +222,20 @@ jobs:
             -f slug="$SLUG" \
             -f links="$LINKS" \
             -f mode=publish \
+            -f runner="$RUNNER_CHOICE" \
             -f continuation="$next"
+
+      # The third safety net, after the machine's own shutdown and the
+      # orchestrator's own teardown: a job that is CANCELLED kills the step
+      # mid-run, and only an always() step runs after that. It deletes this
+      # run's machine by tag, and nothing else's.
+      - name: Make sure no machine of this run is still running
+        if: always() && inputs.runner == 'scaleway'
+        env:
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_ZONE: ${{ secrets.SCW_ZONE }}
+        run: node scripts/run-on-scaleway.mjs --sweep --run "$GITHUB_RUN_ID" --older-than-minutes 0
 
       - name: Say how many runner minutes this used
         if: always()
@@ -179,5 +248,7 @@ jobs:
             echo ""
             echo "A private repository gets 2,000 free minutes a month:"
             echo "about $(( 2000 / (minutes > 0 ? minutes : 1) )) runs like this one."
+            echo "On the scaleway runner those minutes are only the orchestration;"
+            echo "what the machine itself cost is printed above, in euro."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "runner minutes: ${minutes}"
