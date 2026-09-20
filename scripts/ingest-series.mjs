@@ -33,7 +33,30 @@
  *     80 costs the remaining 40 and nothing else;
  *   - every number in the manifest is measured (ffmpeg, the parsed cues, the
  *     files on disk), never declared by the delivery.
+ *
+ * Media on R2 (docs/cloud-ingest.md). When MEDIA_BASE_URL, R2_ACCOUNT_ID,
+ * R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET are all set, nothing
+ * is written under apps/web/public: every episode that passes is uploaded to
+ * the bucket as soon as it is packaged (renditions in their revision folder,
+ * poster, share card and captions named by their content), and the manifest
+ * points at MEDIA_BASE_URL. The same three properties hold there: a refusal
+ * writes no manifest, so the catalog keeps pointing at what was published
+ * before (objects on the store never change, only new ones are added); an
+ * episode already on the store with the same source, gate version and
+ * options is not encoded again (its record is kept under .ingest-records/);
+ * and the numbers are the same measured ones. Extra flags, R2 only:
+ *
+ *   --only 3,5-7     package only these episodes now; the others must be on
+ *                    the store already, or the run ends "incomplete" (exit 3)
+ *                    and writes no manifest — a series longer than one run
+ *                    is published over several (scripts/cloud-ingest.mjs)
+ *   --status         print, as JSON, which episodes are already on the store
+ *   --free-disk      delete each episode's local renditions once uploaded
+ *   --records-root <dir>   where the records live (default .ingest-records/)
+ *
+ * With none of those variables set, everything works exactly as before.
  */
+import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -72,7 +95,10 @@ import {
   isSlug,
   packageFlags,
   REVISION_PATTERN,
+  sourceIdentity,
 } from "./lib/delivery-rules.mjs";
+import { hashedName, mediaConfig, mediaUrl, objectKey } from "./lib/media-publish.mjs";
+import { createMediaStore, publishFolder, publishObject } from "./lib/r2.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -120,9 +146,18 @@ const SHARE_CARD_HEIGHT = 630;
 /** Must match scripts/package-episode.mjs: a rule change re-runs the pack. */
 const GATE_VERSION = 3;
 
-const ROOT_FLAGS = new Set(["--delivery-root", "--publish-root", "--generated-root", "--stage-root"]);
+const ROOT_FLAGS = new Set([
+  "--delivery-root",
+  "--publish-root",
+  "--generated-root",
+  "--stage-root",
+  "--records-root",
+  "--only",
+]);
 const args = process.argv.slice(2);
 const force = args.includes("--force");
+const statusOnly = args.includes("--status");
+const freeDisk = args.includes("--free-disk");
 const requestedSlugs = args.filter(
   (arg, index) => !arg.startsWith("--") && !ROOT_FLAGS.has(args[index - 1] ?? ""),
 );
@@ -130,6 +165,38 @@ const requestedSlugs = args.filter(
 function die(message) {
   console.error(`ingest-series: ${message}`);
   process.exit(1);
+}
+
+/** Exit code of a run that published part of a series on R2 and must be run again. */
+const EXIT_INCOMPLETE = 3;
+
+/** Media inside the export (as always), or on R2 when its variables are set. */
+const media = mediaConfig(process.env);
+if (media.mode === "error") die(`the media store is half configured:\n  - ${media.problems.join("\n  - ")}`);
+/** What is already on the media store, per episode; next to the stage, like it. */
+const recordsRoot = rootFlag(
+  "--records-root",
+  process.argv.includes("--publish-root")
+    ? join(dirname(publishRoot), ".ingest-records")
+    : join(repoRoot, ".ingest-records"),
+);
+
+/** --only 3,5-7 → Set {3,5,6,7}, or null. */
+function onlyEpisodes() {
+  const at = args.indexOf("--only");
+  if (at === -1) return null;
+  const raw = args[at + 1] ?? "";
+  const numbers = new Set();
+  for (const part of raw.split(",")) {
+    const range = /^(\d+)(?:-(\d+))?$/.exec(part.trim());
+    if (!range) die(`--only "${raw}": use episode numbers and ranges, like 3,5-7`);
+    for (let n = Number(range[1]); n <= Number(range[2] ?? range[1]); n += 1) numbers.add(n);
+  }
+  return numbers;
+}
+const only = onlyEpisodes();
+if (media.mode !== "r2" && (only || statusOnly || freeDisk)) {
+  die("--only, --status and --free-disk work only with media on R2 (docs/cloud-ingest.md): in the export a series is published whole");
 }
 
 function run(command, commandArgs, options = {}) {
@@ -277,12 +344,21 @@ function readRecord(dir) {
  * replaced, never written through.
  */
 function placeInRevision(episodeDir, record) {
+  const recordPath = join(episodeDir, "manifest.json");
+  /** The record next to the encode always says what it is and where it sits. */
+  const write = (revision) => {
+    const text = `${JSON.stringify({ ...record, revision }, null, 2)}\n`;
+    if (existsSync(recordPath) && readFileSync(recordPath, "utf8") === text) return revision;
+    rmSync(recordPath, { force: true });
+    writeFileSync(recordPath, text);
+    return revision;
+  };
   if (
     typeof record.revision === "string" &&
     REVISION_PATTERN.test(record.revision) &&
     existsSync(join(episodeDir, record.revision, "master.m3u8"))
   ) {
-    return record.revision;
+    return write(record.revision);
   }
   const files = [...listFiles(episodeDir)].filter(([rel]) => rel !== "manifest.json");
   const revision = encodeRevision(files.map(([rel, path]) => [rel, sha256(path)]));
@@ -296,10 +372,33 @@ function placeInRevision(episodeDir, record) {
       rmSync(join(episodeDir, name), { recursive: true, force: true });
     }
   }
-  const recordPath = join(episodeDir, "manifest.json");
-  rmSync(recordPath, { force: true });
-  writeFileSync(recordPath, `${JSON.stringify({ ...record, revision }, null, 2)}\n`);
-  return revision;
+  return write(revision);
+}
+
+/**
+ * An episode's master, and who it is: the sha256 of its bytes, or — for an
+ * episode split from a compilation — the frames it was cut from, read from
+ * <master>.source.json (delivery-rules.mjs, sourceIdentity).
+ */
+function readSource(dir, episode) {
+  const declared = isNonEmptyString(episode.master);
+  const masterPath = resolve(dir, declared ? episode.master : "");
+  const present = declared && existsSync(masterPath) && statSync(masterPath).isFile();
+  let provenance = null;
+  const provenancePath = `${masterPath}.source.json`;
+  if (declared && existsSync(provenancePath)) {
+    try {
+      provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
+    } catch {
+      provenance = { identity: "unreadable" };
+    }
+  }
+  const verdict = sourceIdentity({
+    provenance,
+    masterSha256: present ? sha256(masterPath) : null,
+    masterLabel: declared ? episode.master : "(not declared)",
+  });
+  return { masterPath, ...verdict };
 }
 
 /** The delivery file, before anything is trusted about it — and before any path is built from it. */
@@ -446,8 +545,45 @@ function swapIntoPlace(slug, stageDir, publishDir) {
   }
 }
 
-function ingestSeries(slug) {
+/** The series manifest the app reads: copy and rights from the delivery, episodes as measured. */
+function seriesManifest(slug, delivery, episodes) {
+  return {
+    schemaVersion: SERIES_MANIFEST_VERSION,
+    seriesId: delivery.seriesId,
+    seriesSlug: slug,
+    title: delivery.title,
+    status: delivery.status === "draft" ? "draft" : "published",
+    defaultLocale: delivery.defaultLocale,
+    localizedMetadata: delivery.localizedMetadata ?? {},
+    producerId: delivery.producerId,
+    producerOfRecord: delivery.producerOfRecord,
+    socialClipsAllowed: delivery.socialClipsAllowed,
+    rights: {
+      territories: delivery.rights.territories,
+      languages: delivery.rights.languages,
+      windowStart: delivery.rights.windowStart ?? null,
+      windowEnd: delivery.rights.windowEnd ?? null,
+    },
+    packagedAt: new Date().toISOString(),
+    gateVersion: GATE_VERSION,
+    episodes,
+  };
+}
+
+/** An ingest that changes nothing writes nothing: the date moves only with the content. */
+function keepPackagedAtWhenUnchanged(slug, manifest) {
+  const previous = previousManifest(slug);
+  if (
+    previous &&
+    JSON.stringify({ ...previous, packagedAt: "" }) === JSON.stringify({ ...manifest, packagedAt: "" })
+  ) {
+    manifest.packagedAt = previous.packagedAt;
+  }
+}
+
+async function ingestSeries(slug) {
   const { dir, delivery } = readDelivery(slug);
+  if (media.mode === "r2") return ingestSeriesToMedia(slug, dir, delivery);
   const publishDir = join(publishRoot, slug);
   const stageDir = join(stageRoot, slug);
   const stageHls = join(stageDir, "hls");
@@ -483,15 +619,18 @@ function ingestSeries(slug) {
     const episodeSlug = episodeSlugOf(episode);
     const issues = [];
 
-    const masterPath = resolve(dir, episode.master ?? "");
-    if (!isNonEmptyString(episode.master) || !existsSync(masterPath)) {
-      failures.push({
-        label,
-        issues: [{ code: "missing_master", message: `no master at ${episode.master ?? "(not declared)"}` }],
-      });
+    const source = readSource(dir, episode);
+    if (source.issues.length === 0 && !source.masterPresent) {
+      // Split episodes carry their identity without the file; the export
+      // still needs the file to package it.
+      source.issues.push({ code: "missing_master", message: `no master at ${episode.master}` });
+    }
+    if (source.issues.length > 0) {
+      failures.push({ label, issues: source.issues });
       continue;
     }
-    const sourceSha256 = sha256(masterPath);
+    const { masterPath } = source;
+    const sourceSha256 = source.identity;
     issues.push(...checkDuplicateSource(sourceSha256, seenSources));
     seenSources.set(sourceSha256, label);
     if (issues.length > 0) {
@@ -545,7 +684,7 @@ function ingestSeries(slug) {
       packagedNow.push(label);
     }
     validStaged.add(episodeSlug);
-    const revision = placeInRevision(stagedEpisode, packaged);
+    const revision = placeInRevision(stagedEpisode, withIdentity(packaged, sourceSha256));
 
     const durationMs = packaged.durationMs;
 
@@ -560,89 +699,40 @@ function ingestSeries(slug) {
       join(stageDir, "share", shareName),
     );
 
-    const captions = [];
-    const declared = Array.isArray(episode.captions) ? episode.captions : [];
-    if (declared.length === 0) {
-      issues.push({
-        code: "no_captions",
-        message: "no caption file declared: most of the feed is watched muted",
-      });
-    }
-    for (const track of declared) {
-      const language = track.language;
-      const sourcePath = resolve(dir, track.file ?? "");
-      const trackLabel = `${episodeSlug} [${String(language)}]`;
-      if (!isNonEmptyString(track.file) || !existsSync(sourcePath)) {
-        issues.push({
-          code: "missing_caption_file",
-          message: `${trackLabel}: no file at ${track.file ?? "(not declared)"}`,
-        });
-        continue;
-      }
-      const raw = readFileSync(sourcePath, "utf8");
-      const vtt = sourcePath.toLowerCase().endsWith(".srt") ? srtToVtt(raw) : raw;
-      const parsed = parseVttCues(vtt);
-      const trackIssues = [
-        ...checkCaptionTrack(parsed, {
-          durationMs,
-          language,
-          hasAudio: packaged.hasAudio === true,
-        }),
-        ...checkCaptionLicence(language, delivery.rights),
-      ];
-      if (trackIssues.length > 0) {
-        for (const trackIssue of trackIssues) {
-          issues.push({ code: trackIssue.code, message: `${trackLabel}: ${trackIssue.message}` });
-        }
-        continue;
-      }
-      for (const note of captionNotes(parsed, durationMs)) {
-        notes.push(`${label} ${trackLabel}: [${note.code}] ${note.message}`);
-      }
-      const outName = `${episodeSlug}.${language}.vtt`;
-      const outPath = join(stageDir, "captions", outName);
-      mkdirSync(dirname(outPath), { recursive: true });
-      writeFileSync(outPath, vtt);
-      const summary = captionSummary(parsed, durationMs);
-      captions.push({
-        language,
-        url: `/content/series/${slug}/captions/${outName}`,
-        kind: track.kind === "subtitles" ? "subtitles" : "captions",
-        default: track.default === true,
-        // "ready" now means parsed, covering this episode, and on disk.
-        status: "ready",
-        cues: summary.cues,
-        coverage: summary.coverage,
-      });
-    }
-    if (captions.length > 0 && !captions.some((track) => track.default)) {
-      captions[0].default = true;
-    }
+    const captioned = buildCaptions({
+      dir,
+      delivery,
+      episode,
+      episodeSlug,
+      label,
+      durationMs,
+      hasAudio: packaged.hasAudio === true,
+      place: (outName, vtt) => {
+        const outPath = join(stageDir, "captions", outName);
+        mkdirSync(dirname(outPath), { recursive: true });
+        writeFileSync(outPath, vtt);
+        return `/content/series/${slug}/captions/${outName}`;
+      },
+    });
+    issues.push(...captioned.issues);
+    notes.push(...captioned.notes);
 
     if (issues.length > 0) {
       failures.push({ label, issues });
       continue;
     }
 
-    manifestEpisodes.push({
-      episodeNumber: number,
-      episodeSlug,
-      title: episode.title,
-      hook: episode.hook,
-      localizedMetadata: localizedFor(delivery, episode),
-      durationMs,
-      width: packaged.width,
-      height: packaged.height,
-      fps: packaged.fps,
-      playbackReference: `/content/series/${slug}/hls/${episodeSlug}/${revision}/master.m3u8`,
-      posterReference: `/content/series/${slug}/posters/${posterName}`,
-      shareCardReference: `/content/series/${slug}/share/${shareName}`,
-      captions,
-      sourceSha256,
-      publishedLufs: packaged.loudness?.publishedLufs ?? null,
-      genres: episode.genres ?? delivery.genres ?? [],
-      tropes: episode.tropes ?? delivery.tropes ?? [],
-    });
+    manifestEpisodes.push(
+      manifestEpisode(delivery, episode, {
+        episodeSlug,
+        packaged,
+        playbackReference: `/content/series/${slug}/hls/${episodeSlug}/${revision}/master.m3u8`,
+        posterReference: `/content/series/${slug}/posters/${posterName}`,
+        shareCardReference: `/content/series/${slug}/share/${shareName}`,
+        captions: captioned.captions,
+        sourceSha256,
+      }),
+    );
   }
 
   // Staged episode folders that are not a package the gate accepted in this
@@ -666,27 +756,7 @@ function ingestSeries(slug) {
     return { ok: false, slug };
   }
 
-  const manifest = {
-    schemaVersion: SERIES_MANIFEST_VERSION,
-    seriesId: delivery.seriesId,
-    seriesSlug: slug,
-    title: delivery.title,
-    status: delivery.status === "draft" ? "draft" : "published",
-    defaultLocale: delivery.defaultLocale,
-    localizedMetadata: delivery.localizedMetadata ?? {},
-    producerId: delivery.producerId,
-    producerOfRecord: delivery.producerOfRecord,
-    socialClipsAllowed: delivery.socialClipsAllowed,
-    rights: {
-      territories: delivery.rights.territories,
-      languages: delivery.rights.languages,
-      windowStart: delivery.rights.windowStart ?? null,
-      windowEnd: delivery.rights.windowEnd ?? null,
-    },
-    packagedAt: new Date().toISOString(),
-    gateVersion: GATE_VERSION,
-    episodes: manifestEpisodes,
-  };
+  const manifest = seriesManifest(slug, delivery, manifestEpisodes);
 
   // What disappears with the swap, named at the level a person reads it:
   // "hls/episode-6", "posters/episode-6.webp".
@@ -702,14 +772,7 @@ function ingestSeries(slug) {
     replaced = true;
   }
 
-  const previous = previousManifest(slug);
-  if (
-    previous &&
-    JSON.stringify({ ...previous, packagedAt: "" }) ===
-      JSON.stringify({ ...manifest, packagedAt: "" })
-  ) {
-    manifest.packagedAt = previous.packagedAt;
-  }
+  keepPackagedAtWhenUnchanged(slug, manifest);
   writeManifestModule(slug, manifest);
 
   reportSeries(slug, manifest, {
@@ -722,6 +785,368 @@ function ingestSeries(slug) {
     publishDir,
   });
   return { ok: true, slug, manifest };
+}
+
+/**
+ * A packaging record says which master it was made from, by the hash of that
+ * file. An episode cut from a compilation is not a whole file, so the record
+ * also carries who it is — the frames it was cut from (delivery-rules.mjs,
+ * sourceIdentity). Written only when the two differ, so every record already
+ * on disk stays byte for byte as it is.
+ */
+function withIdentity(packaged, identity) {
+  return packaged.sourceSha256 === identity ? packaged : { ...packaged, sourceIdentity: identity };
+}
+
+/** JSON written whole or not at all: a record half-written by a killed run would lie. */
+function writeJsonAtomic(path, value) {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporary = `${path}.partial`;
+  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`);
+  renameSync(temporary, path);
+}
+
+function readJsonIfAny(path) {
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The same delivery, published to the media store instead of the export
+ * (docs/cloud-ingest.md). Episode by episode: package (or resume), upload
+ * the renditions, poster and card, then write the record that says so. The
+ * manifest is written only when every episode is on the store and every
+ * caption checks out — until then the catalog keeps what it had.
+ */
+async function ingestSeriesToMedia(slug, dir, delivery) {
+  const { baseUrl } = media.config;
+  const store = createMediaStore(media.config);
+  const stageDir = join(stageRoot, slug);
+  const stageHls = join(stageDir, "hls");
+  const recordsDir = join(recordsRoot, slug);
+  if (!isInside(stageRoot, stageDir) || !isInside(recordsRoot, recordsDir)) {
+    die(`"${slug}" resolves outside the stage or records folder`);
+  }
+  for (const part of ["posters", "share", "captions"]) {
+    rmSync(join(stageDir, part), { recursive: true, force: true });
+  }
+  mkdirSync(stageHls, { recursive: true });
+
+  const started = Date.now();
+  const failures = [];
+  const notes = [];
+  const packagedNow = [];
+  const resumed = [];
+  const skipped = [];
+  const pending = [];
+  const status = [];
+  const seenSources = new Map();
+  const manifestEpisodes = [];
+  const captionObjects = new Map();
+  const uploaded = { uploaded: 0, skipped: 0, bytes: 0 };
+  let encodedSeconds = 0;
+  const add = (done) => {
+    uploaded.uploaded += done.uploaded;
+    uploaded.skipped += done.skipped;
+    uploaded.bytes += done.bytes;
+  };
+  const seriesKey = (rel) => objectKey(baseUrl, `content/series/${slug}/${rel}`);
+
+  const episodes = [...delivery.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber);
+  for (const episode of episodes) {
+    const number = episode.episodeNumber;
+    const label = `${slug} episode ${number}`;
+    const episodeSlug = episodeSlugOf(episode);
+    const source = readSource(dir, episode);
+    if (source.issues.length > 0) {
+      failures.push({ label, issues: source.issues });
+      continue;
+    }
+    const duplicate = checkDuplicateSource(source.identity, seenSources);
+    seenSources.set(source.identity, label);
+    if (duplicate.length > 0) {
+      failures.push({ label, issues: duplicate });
+      continue;
+    }
+    const gateOptions = gateOptionsFor(delivery, episode);
+    const expected = { sourceSha256: source.identity, gateVersion: GATE_VERSION, gateOptions };
+    const recordPath = join(recordsDir, `${episodeSlug}.json`);
+    let record = force ? null : readJsonIfAny(recordPath);
+    let onStore = false;
+    if (isPackageCurrent(record, expected) && record.media) {
+      const keys = [record.media.playlistKey, record.media.posterKey, record.media.shareKey];
+      onStore = keys.every((key) => typeof key === "string") &&
+        (await Promise.all(keys.map((key) => store.head(key)))).every((head) => head.exists);
+    }
+    if (statusOnly) {
+      status.push({ episodeNumber: number, episodeSlug, onStore, masterPresent: source.masterPresent });
+      continue;
+    }
+
+    if (onStore) {
+      skipped.push(label);
+    } else {
+      if (only && !only.has(number)) {
+        pending.push(label);
+        continue;
+      }
+      if (!source.masterPresent) {
+        failures.push({
+          label,
+          issues: [{ code: "missing_master", message: `not on the media store yet, and no master at ${episode.master} to package` }],
+        });
+        continue;
+      }
+      const stagedEpisode = join(stageHls, episodeSlug);
+      if (!isInside(stageHls, stagedEpisode)) die(`${label}: "${episodeSlug}" leaves the stage folder`);
+      let packaged = force ? null : readRecord(stagedEpisode);
+      if (isPackageCurrent(packaged, expected)) {
+        resumed.push(label);
+      } else {
+        rmSync(stagedEpisode, { recursive: true, force: true });
+        const encodeStarted = Date.now();
+        const result = run(
+          process.execPath,
+          [
+            join(repoRoot, "scripts", "package-episode.mjs"),
+            source.masterPath,
+            stagedEpisode,
+            "--no-poster",
+            "--label",
+            label,
+            ...packageFlags(gateOptions),
+          ],
+          { stdio: "inherit" },
+        );
+        if (result.status !== 0) {
+          rmSync(stagedEpisode, { recursive: true, force: true });
+          failures.push({
+            label,
+            issues: [{ code: "gate_refused", message: "the technical quality gate refused it (reasons above)" }],
+          });
+          continue;
+        }
+        packaged = readJson(join(stagedEpisode, "manifest.json"));
+        packagedNow.push(label);
+        encodedSeconds += (Date.now() - encodeStarted) / 1000;
+      }
+      const revision = placeInRevision(stagedEpisode, withIdentity(packaged, source.identity));
+      const posterPath = join(stageDir, "posters", `${episodeSlug}.webp`);
+      const sharePath = join(stageDir, "share", `${episodeSlug}.jpg`);
+      renderImages(source.masterPath, packaged.durationMs / 1000, posterPath, sharePath);
+      const posterKey = seriesKey(`posters/${hashedName(`${episodeSlug}.webp`, sha256(posterPath))}`);
+      const shareKey = seriesKey(`share/${hashedName(`${episodeSlug}.jpg`, sha256(sharePath))}`);
+      const folderKey = seriesKey(`hls/${episodeSlug}/${revision}`);
+      const revisionDir = join(stagedEpisode, revision);
+      try {
+        add(
+          await publishFolder(store, {
+            keyPrefix: folderKey,
+            files: [...listFiles(revisionDir).keys()],
+            read: (rel) => readFileSync(join(revisionDir, rel)),
+          }),
+        );
+        add(await publishObject(store, posterKey, () => readFileSync(posterPath)));
+        add(await publishObject(store, shareKey, () => readFileSync(sharePath)));
+      } catch (error) {
+        // Nothing points at a half-uploaded folder: its master.m3u8 goes last,
+        // and no record or manifest is written. The next run finishes it.
+        die(`${label}: upload stopped — ${error.message}. Nothing was published; run again to continue.`);
+      }
+      record = {
+        ...withIdentity(packaged, source.identity),
+        revision,
+        media: { playlistKey: `${folderKey}/master.m3u8`, posterKey, shareKey },
+      };
+      writeJsonAtomic(recordPath, record);
+      if (freeDisk) {
+        rmSync(stagedEpisode, { recursive: true, force: true });
+        rmSync(posterPath, { force: true });
+        rmSync(sharePath, { force: true });
+      }
+    }
+
+    const captioned = buildCaptions({
+      dir,
+      delivery,
+      episode,
+      episodeSlug,
+      label,
+      durationMs: record.durationMs,
+      hasAudio: record.hasAudio === true,
+      place: (outName, vtt) => {
+        const key = seriesKey(`captions/${hashedName(outName, createHash("sha256").update(vtt).digest("hex"))}`);
+        captionObjects.set(key, vtt);
+        return mediaUrl(baseUrl, key);
+      },
+    });
+    notes.push(...captioned.notes);
+    if (captioned.issues.length > 0) {
+      failures.push({ label, issues: captioned.issues });
+      continue;
+    }
+    manifestEpisodes.push(
+      manifestEpisode(delivery, episode, {
+        episodeSlug,
+        packaged: record,
+        playbackReference: mediaUrl(baseUrl, record.media.playlistKey),
+        posterReference: mediaUrl(baseUrl, record.media.posterKey),
+        shareCardReference: mediaUrl(baseUrl, record.media.shareKey),
+        captions: captioned.captions,
+        sourceSha256: source.identity,
+      }),
+    );
+  }
+
+  if (statusOnly) {
+    process.stdout.write(
+      `${JSON.stringify({ slug, episodes: status, onStore: status.filter((entry) => entry.onStore).length }, null, 2)}\n`,
+    );
+    return { ok: true, slug };
+  }
+
+  const summary = `packaged now: ${packagedNow.length}, resumed from the stage: ${resumed.length}, unchanged: ${skipped.length}`;
+  const traffic =
+    `media store: ${uploaded.uploaded} object(s) uploaded (${Math.round(uploaded.bytes / 1024)} kB), ` +
+    `${uploaded.skipped} already there; ${store.stats.retried} retried request(s)`;
+  if (failures.length > 0) {
+    console.error(`\ningest-series: REFUSED ${slug} — ${failures.length} episode(s) cannot be published`);
+    for (const failure of failures) console.error(formatIssues(failure.label, failure.issues));
+    console.error(`  ${summary}\n  ${traffic}`);
+    console.error(
+      "  No manifest was written: the catalog keeps pointing at what was published before. Fix the delivery and run again.",
+    );
+    return { ok: false, slug };
+  }
+  if (pending.length > 0) {
+    console.error(
+      `\ningest-series: INCOMPLETE ${slug} — ${episodes.length - pending.length} of ${episodes.length} episodes on the media store, ` +
+        `${pending.length} still to package. No manifest yet: run again to continue.`,
+    );
+    console.error(`  ${summary}\n  ${traffic}`);
+    console.error(`  encode: ${encodedSeconds.toFixed(0)} s in this run (${((Date.now() - started) / 1000).toFixed(0)} s in all)`);
+    return { ok: false, incomplete: true, slug };
+  }
+
+  // Every episode is on the store: the captions go up last, then the manifest.
+  try {
+    for (const [key, vtt] of captionObjects) add(await publishObject(store, key, () => Buffer.from(vtt, "utf8")));
+  } catch (error) {
+    die(`${slug}: caption upload stopped — ${error.message}. No manifest written; run again.`);
+  }
+  const manifest = seriesManifest(slug, delivery, manifestEpisodes);
+  keepPackagedAtWhenUnchanged(slug, manifest);
+  writeManifestModule(slug, manifest);
+  rmSync(stageDir, { recursive: true, force: true });
+
+  const loudness = manifest.episodes.map((entry) => entry.publishedLufs).filter((value) => typeof value === "number");
+  console.error(`\ningest-series: ${slug} ok — ${manifest.episodes.length} episodes on ${new URL(baseUrl).host}`);
+  console.error(`  ${summary}`);
+  console.error(`  ${traffic}`);
+  if (loudness.length > 0) {
+    console.error(`  loudness:     ${Math.min(...loudness).toFixed(1)} … ${Math.max(...loudness).toFixed(1)} LUFS (target -16)`);
+  }
+  console.error(`  encode: ${encodedSeconds.toFixed(0)} s in this run (${((Date.now() - started) / 1000).toFixed(0)} s in all)`);
+  const exported = join(publishRoot, slug);
+  if (existsSync(exported)) {
+    console.error(
+      `  NOTE: ${exported} is no longer what the manifest points at. Remove it (git rm -r) so the export stops carrying it.`,
+    );
+  }
+  if (notes.length > 0) {
+    console.error("  worth a look (published anyway):");
+    for (const note of notes) console.error(`    - ${note}`);
+  }
+  return { ok: true, slug, manifest };
+}
+
+/**
+ * The caption tracks of one episode, each checked against the measured
+ * length and the licence. `place(outName, vtt)` keeps a verified file and
+ * returns the URL the manifest will carry: a path in the export, or a media
+ * URL on R2.
+ */
+function buildCaptions({ dir, delivery, episode, episodeSlug, label, durationMs, hasAudio, place }) {
+  const captions = [];
+  const issues = [];
+  const notes = [];
+  const declared = Array.isArray(episode.captions) ? episode.captions : [];
+  if (declared.length === 0) {
+    issues.push({
+      code: "no_captions",
+      message: "no caption file declared: most of the feed is watched muted",
+    });
+  }
+  for (const track of declared) {
+    const language = track.language;
+    const sourcePath = resolve(dir, track.file ?? "");
+    const trackLabel = `${episodeSlug} [${String(language)}]`;
+    if (!isNonEmptyString(track.file) || !existsSync(sourcePath)) {
+      issues.push({
+        code: "missing_caption_file",
+        message: `${trackLabel}: no file at ${track.file ?? "(not declared)"}`,
+      });
+      continue;
+    }
+    const raw = readFileSync(sourcePath, "utf8");
+    const vtt = sourcePath.toLowerCase().endsWith(".srt") ? srtToVtt(raw) : raw;
+    const parsed = parseVttCues(vtt);
+    const trackIssues = [
+      ...checkCaptionTrack(parsed, { durationMs, language, hasAudio }),
+      ...checkCaptionLicence(language, delivery.rights),
+    ];
+    if (trackIssues.length > 0) {
+      for (const trackIssue of trackIssues) {
+        issues.push({ code: trackIssue.code, message: `${trackLabel}: ${trackIssue.message}` });
+      }
+      continue;
+    }
+    for (const note of captionNotes(parsed, durationMs)) {
+      notes.push(`${label} ${trackLabel}: [${note.code}] ${note.message}`);
+    }
+    const summary = captionSummary(parsed, durationMs);
+    captions.push({
+      language,
+      url: place(`${episodeSlug}.${language}.vtt`, vtt),
+      kind: track.kind === "subtitles" ? "subtitles" : "captions",
+      default: track.default === true,
+      // "ready" means parsed, covering this episode, and stored.
+      status: "ready",
+      cues: summary.cues,
+      coverage: summary.coverage,
+    });
+  }
+  if (captions.length > 0 && !captions.some((track) => track.default)) {
+    captions[0].default = true;
+  }
+  return { captions, issues, notes };
+}
+
+/** One episode of the series manifest: copy from the delivery, numbers from the packaging record. */
+function manifestEpisode(delivery, episode, { episodeSlug, packaged, playbackReference, posterReference, shareCardReference, captions, sourceSha256 }) {
+  return {
+    episodeNumber: episode.episodeNumber,
+    episodeSlug,
+    title: episode.title,
+    hook: episode.hook,
+    localizedMetadata: localizedFor(delivery, episode),
+    durationMs: packaged.durationMs,
+    width: packaged.width,
+    height: packaged.height,
+    fps: packaged.fps,
+    playbackReference,
+    posterReference,
+    shareCardReference,
+    captions,
+    sourceSha256,
+    publishedLufs: packaged.loudness?.publishedLufs ?? null,
+    genres: episode.genres ?? delivery.genres ?? [],
+    tropes: episode.tropes ?? delivery.tropes ?? [],
+  };
 }
 
 /**
@@ -863,12 +1288,19 @@ const slugs =
 if (slugs.length === 0) die(`no series with a series.json under ${deliveryRoot}`);
 
 let refused = 0;
+let incomplete = 0;
 for (const slug of slugs) {
-  const result = ingestSeries(slug);
-  if (!result.ok) refused += 1;
+  const result = await ingestSeries(slug);
+  if (result.incomplete) incomplete += 1;
+  else if (!result.ok) refused += 1;
 }
+if (statusOnly) process.exit(0);
 if (refused > 0) {
   console.error(`\ningest-series: ${refused} of ${slugs.length} series refused`);
   process.exit(1);
+}
+if (incomplete > 0) {
+  console.error(`\ningest-series: ${incomplete} of ${slugs.length} series incomplete: run again`);
+  process.exit(EXIT_INCOMPLETE);
 }
 console.error(`\ningest-series: ${slugs.length} series ready`);

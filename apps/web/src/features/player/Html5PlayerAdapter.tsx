@@ -4,8 +4,10 @@ import { useEffect, useRef, type ReactElement, type VideoHTMLAttributes } from "
 
 import {
   chooseHlsEngine,
+  isCrossOriginMedia,
   isHlsSource,
   isSafariUserAgent,
+  needsCrossOriginMedia,
   planHlsLoad,
   shouldWarmHlsEngine,
   startQuality,
@@ -416,7 +418,12 @@ export function Html5PlayerAdapter({
     startAtRef.current = startAt;
     attachedAtRef.current = Date.now();
     markProgress();
-    video.poster = current.poster ?? "";
+    // The element asks for CORS when media comes from another host (the
+    // subtitles need it), and that would make it fetch this poster in CORS
+    // mode too — for a picture the feed already draws under the video, out of
+    // the same file. Asking twice, the second time under rules an image does
+    // not need, is how a poster ends up blocked: it is not asked for.
+    video.poster = current.poster && !isCrossOriginMedia(current.poster) ? current.poster : "";
 
     if (!isHlsSource(current.mimeType ?? "", current.uri)) {
       video.src = current.uri;
@@ -724,7 +731,12 @@ export function Html5PlayerAdapter({
     playsInline: true,
     muted,
     preload,
-    // Same-origin /content assets — skip CORS tax on first play
+    // Same-origin /content assets carry no CORS tax on first play. Media from
+    // MEDIA_BASE_URL does need it: without crossOrigin the browser refuses to
+    // read a subtitle track from another host, and says nothing (hlsSupport).
+    ...(needsCrossOriginMedia([source.uri, ...captionTracks.map((track) => track.url)])
+      ? { crossOrigin: "anonymous" as const }
+      : {}),
     style: {
       width: "100%",
       height: "100%",

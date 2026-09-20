@@ -99,7 +99,7 @@ build.
 | -------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------ |
 | open the site to search engines        | `FLOW_PUBLIC` = `1`                        | Pages and files lose `noindex`, and `robots.txt` names `sitemap.xml`, which lists every episode page. Only the exact value `1` does it; delete the variable to close the site again |
 | turn the offline service worker off    | `FLOW_SERVICE_WORKER` = `off`              | The next deploy ships a worker whose only job is to remove itself and its caches from every phone that had it. Delete the variable to bring it back |
-| serve video from another host (later)  | `MEDIA_BASE_URL` = `https://media.…`       | The security policy allows video, posters and playlists from that host. It does not move any file by itself (docs/content-operations.md) |
+| serve video from a media store         | `MEDIA_BASE_URL` = `https://media.…`       | The security policy allows video, posters, subtitles and playlists from that host, and the build refuses a catalog whose media is anywhere else. Setting it here does not move any file: what puts media there is the ingest workflow (docs/cloud-ingest.md) |
 | measure (when the collector exists)    | `NEXT_PUBLIC_ANALYTICS_ENDPOINT` = `https://…`, and delete `FLOW_ALLOW_NO_ANALYTICS` | Events go to the collector; the security policy allows exactly that host |
 
 ## 6. Your own domain (when you buy it)
@@ -140,4 +140,6 @@ build.
   `scripts/lib/platform.mjs` writes each pattern once. Pages' own behaviour (Brotli, HTTP/3, the `.html` redirect) is not
   reproduced locally.
 - Cloudflare Pages limits one deploy to 20,000 files and 25 MiB per file; the export check
-  refuses more. Video will outgrow that: that is when `MEDIA_BASE_URL` takes over.
+  refuses more. Video outgrows that at about 100 episodes, which is why a series published
+  through the ingest workflow keeps its media on R2 and only its manifest in the build
+  (`docs/cloud-ingest.md`). The stand-in pack still ships inside the export.

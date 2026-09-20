@@ -1,6 +1,7 @@
 import {
   getLaunchFeedCatalog,
   parseStressEpisodeCount,
+  parseStressMediaBase,
   withStressEpisodes,
   type FeedCatalog,
 } from "@project-flow/feed-domain";
@@ -17,6 +18,9 @@ export function getWebFeedCatalog(): FeedCatalog {
   cached ??= withStressEpisodes(
     getLaunchFeedCatalog(),
     parseStressEpisodeCount(process.env.FLOW_STRESS_EPISODES),
+    // Scale runs only: serve the generated episodes' media from another
+    // origin, the way media published to R2 reaches a viewer.
+    parseStressMediaBase(process.env.FLOW_STRESS_MEDIA_BASE),
   );
   return cached;
 }

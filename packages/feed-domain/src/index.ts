@@ -47,6 +47,7 @@ export {
   STRESS_EPISODES_PER_SERIES,
   STRESS_ORDER_OFFSET,
   parseStressEpisodeCount,
+  parseStressMediaBase,
   withStressEpisodes,
 } from "./data/stressCatalog";
 

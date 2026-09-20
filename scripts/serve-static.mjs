@@ -2,7 +2,11 @@
  * Serves a static export the way Cloudflare Pages does, for local checks of
  * the exact files that will be published. Zero dependencies.
  *
- *   node scripts/serve-static.mjs apps/web/out 3100
+ *   node scripts/serve-static.mjs apps/web/out 3100 [allowed-origin]
+ *
+ * With an allowed origin it also answers the CORS headers a bucket with a
+ * CORS rule answers (docs/cloud-ingest.md), so the same files can be served
+ * as a second, media-only origin in `npm run e2e:web:scale`.
  *
  * Routing, in order: exact file → path + ".html" → path + "/index.html" →
  * 404.html with status 404. Byte ranges are honored (Safari refuses to play
@@ -21,7 +25,7 @@ import { extname, join, normalize, resolve, sep } from "node:path";
 
 import { headersFor, parseHeadersFile } from "./lib/pages-headers.mjs";
 
-const [, , dirArg = "apps/web/out", portArg = "3100"] = process.argv;
+const [, , dirArg = "apps/web/out", portArg = "3100", allowedOrigin = ""] = process.argv;
 const root = resolve(dirArg);
 const port = Number(portArg);
 
@@ -88,9 +92,16 @@ const server = createServer((request, response) => {
   }
 
   const pathname = decodeURIComponent((request.url ?? "/").split("?")[0] || "/");
+  // What a bucket with a CORS rule answers, so hls.js and a subtitle track
+  // can read these files from a page on another origin.
+  const cors =
+    allowedOrigin && request.headers.origin && (allowedOrigin === "*" || allowedOrigin === request.headers.origin)
+      ? { "access-control-allow-origin": allowedOrigin === "*" ? "*" : request.headers.origin, vary: "Origin" }
+      : {};
   const headers = {
     "content-type": MIME[extname(file.path).toLowerCase()] ?? "application/octet-stream",
     "accept-ranges": "bytes",
+    ...cors,
     ...(pagesRules
       ? headersFor(pagesRules, pathname, { "cache-control": PAGES_DEFAULT_CACHE })
       : { "cache-control": "no-store" }),

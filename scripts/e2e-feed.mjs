@@ -20,8 +20,11 @@
  *   6. an unknown episode is a real 404 with the friendly page;
  *   7. the HTML of the home and of an episode page stays small;
  *   8. no console errors on the way.
- * With --scale also: a deep link far into the catalog plays, and swiping
- * through the feed extends it without ever holding the whole catalog.
+ * With --scale also: a deep link far into the catalog plays, swiping through
+ * the feed extends it without ever holding the whole catalog, and (46) an
+ * episode whose video, poster and subtitles are addressed on a SECOND origin
+ * — as they are once a series is published to R2 (docs/cloud-ingest.md) —
+ * plays, shows its subtitles and breaks no security policy.
  *
  * Playback recovery (docs/decisions.md, "Playback never ends on a poster"):
  *   9. Continue on the resume offer really seeks to the saved position;
@@ -111,6 +114,9 @@ const EXPORT_DIR = EXPORT_ARG
     : "apps/web/out";
 const PORT = 3217;
 const BASE = `http://localhost:${PORT}`;
+/** The media-only origin of a scale run; must match scripts/build-stress.mjs. */
+const MEDIA_PORT = 3219;
+const MEDIA_ORIGIN = `http://localhost:${MEDIA_PORT}`;
 /** Must match NEXT_EPISODE_WARM_SECONDS in apps/web/src/features/player/hlsSupport.ts. */
 const NEXT_EPISODE_WARM_SECONDS = 4;
 const SEGMENT_SECONDS = 2;
@@ -155,22 +161,22 @@ async function waitForPortFree() {
   throw new Error(`port ${PORT} is still answering: another server is holding it`);
 }
 
-async function waitForServer(child) {
+async function waitForServer(child, base = BASE) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (child.exitCode !== null) {
       throw new Error(
-        `static server exited with ${child.exitCode} instead of serving ${BASE}`,
+        `static server exited with ${child.exitCode} instead of serving ${base}`,
       );
     }
     try {
-      const response = await fetch(`${BASE}/`);
+      const response = await fetch(`${base}/`);
       if (response.ok) return;
     } catch {
       // not listening yet
     }
     await sleep(100);
   }
-  throw new Error(`static server did not start on ${BASE}`);
+  throw new Error(`static server did not start on ${base}`);
 }
 
 function trackPage(page, label, consoleErrors, mediaRequests, posterRequests = []) {
@@ -467,10 +473,24 @@ const server = spawn(
     stdio: "ignore",
   },
 );
+/**
+ * In a scale run the generated episodes' media is addressed on a second
+ * origin (scripts/build-stress.mjs), served here with the CORS headers a
+ * bucket answers: that is how media published to R2 reaches a viewer
+ * (docs/cloud-ingest.md), and check 46 proves it plays.
+ */
+const mediaServer = SCALE
+  ? spawn(
+      process.execPath,
+      ["scripts/serve-static.mjs", EXPORT_DIR, String(MEDIA_PORT), BASE],
+      { cwd: repoRoot, stdio: "ignore" },
+    )
+  : null;
 
 let browser;
 try {
   await waitForServer(server);
+  if (mediaServer) await waitForServer(mediaServer, MEDIA_ORIGIN);
   browser = await chromium.launch({ channel: "chrome", headless: true });
   // 43: every context from here on reports policy violations.
   const cspViolations = [];
@@ -675,6 +695,59 @@ try {
       `shared link ${path} started ${sharedFirst.contentId}`,
     );
     await shared.close();
+  }
+
+  // 46 (scale): media served from another origin, as it is once a series is
+  // published to R2. The generated episodes address their video, poster and
+  // subtitles on MEDIA_ORIGIN, which answers with a bucket's CORS headers.
+  if (SCALE) {
+    const page = await context.newPage();
+    trackPage(page, "media origin", consoleErrors, []);
+    const fromMedia = [];
+    page.on("requestfinished", (request) => {
+      if (request.url().startsWith(MEDIA_ORIGIN)) fromMedia.push(new URL(request.url()).pathname);
+    });
+    await page.goto(`${BASE}/watch/stress-10/episode-60`, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 10_000 });
+    const captioned = await page
+      .waitForFunction(
+        () => (document.querySelector('[data-active="true"] [data-caption]')?.textContent ?? "").length > 0,
+        null,
+        { timeout: 5_000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    const state = await page.evaluate(() => {
+      const active = document.querySelector('[data-active="true"]');
+      const video = active?.querySelector("video");
+      return {
+        playing: (video?.currentTime ?? 0) > 0.2,
+        crossOrigin: video?.getAttribute("crossorigin") ?? null,
+        caption: active?.querySelector("[data-caption]")?.textContent ?? null,
+        poster: active?.querySelector("img")?.getAttribute("src") ?? null,
+      };
+    });
+    measured.mediaOrigin = {
+      requests: fromMedia.length,
+      playlists: fromMedia.filter((path) => path.endsWith(".m3u8")).length,
+      segments: fromMedia.filter((path) => path.endsWith(".m4s")).length,
+      captions: fromMedia.filter((path) => path.endsWith(".vtt")).length,
+      ...state,
+    };
+    check(
+      measured.mediaOrigin.playlists > 0 && measured.mediaOrigin.segments > 0,
+      `nothing played from the media origin: ${JSON.stringify(measured.mediaOrigin)}`,
+    );
+    check(state.playing, `the episode on the media origin did not play: ${JSON.stringify(state)}`);
+    check(
+      state.crossOrigin === "anonymous",
+      `the player did not ask for CORS on cross-origin media (crossorigin=${state.crossOrigin}): subtitles would never load`,
+    );
+    check(
+      captioned && measured.mediaOrigin.captions > 0,
+      `no subtitle was read from the media origin: ${JSON.stringify(measured.mediaOrigin)}`,
+    );
+    await page.close();
   }
 
   // Auto-continue within the series, from a shared link.
@@ -2573,6 +2646,7 @@ try {
 } finally {
   await browser?.close();
   server.kill();
+  mediaServer?.kill();
 }
 
 console.error(JSON.stringify(measured, null, 2));

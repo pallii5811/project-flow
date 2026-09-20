@@ -27,7 +27,12 @@
     "e2e:web:scale": "node scripts/e2e-feed.mjs --scale",
     "e2e:web:platform": "node scripts/e2e-platform.mjs",
     "ingest": "node scripts/ingest-series.mjs",
-    "proof:gate": "node scripts/gate-proof.mjs"
+    "ingest:cloud": "node scripts/cloud-ingest.mjs",
+    "split": "node scripts/split-compilation.mjs",
+    "check:ffmpeg": "node scripts/check-ffmpeg.mjs",
+    "proof:gate": "node scripts/gate-proof.mjs",
+    "proof:split": "node scripts/split-proof.mjs",
+    "proof:cloud": "node scripts/cloud-proof.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -40,6 +45,7 @@
     "prettier": "^3.5.3",
     "typescript": "~5.9.2",
     "typescript-eslint": "^8.26.1",
-    "vitest": "^3.0.8"
+    "vitest": "^3.0.8",
+    "yaml": "^2.9.1"
   }
 }

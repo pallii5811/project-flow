@@ -32,6 +32,11 @@ Thumbs.db
 
 # Content ingest: a series is assembled here before it replaces the published one
 .ingest-stage/
+# Media on R2: what is already on the store, per episode (docs/cloud-ingest.md)
+.ingest-records/
+# Compilation splitter proposals and deliveries downloaded on a runner
+.split-work/
+.delivery/
 
 # Logs / temp
 *.log

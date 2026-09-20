@@ -39,8 +39,42 @@ export function parseStressEpisodeCount(raw: string | undefined): number {
   return count;
 }
 
+/**
+ * Where the generated episodes' media is served from, for the scale run only.
+ * With a base URL, their video, posters, cards and subtitles are addressed on
+ * that origin instead of the site's — which is how media published to R2
+ * reaches a viewer (docs/cloud-ingest.md). It is what lets `npm run
+ * e2e:web:scale` prove, in a browser, that a catalog whose media is on
+ * another host still plays, still shows its subtitles, and breaks no security
+ * policy. Never set for a publishable build (scripts/deploy-checks.mjs
+ * refuses a stress catalog anyway).
+ */
+export function parseStressMediaBase(raw: string | undefined): string | null {
+  const value = (raw ?? "").trim();
+  if (value === "") return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`FLOW_STRESS_MEDIA_BASE must be a URL, got "${raw}"`);
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(`FLOW_STRESS_MEDIA_BASE must be http(s), got "${raw}"`);
+  }
+  return value.replace(/\/+$/, "");
+}
+
+/** A site path ("/content/…") addressed on the media host; anything else untouched. */
+function onMediaHost(url: string, base: string | null): string {
+  return base && url.startsWith("/") ? `${base}${url}` : url;
+}
+
 /** The published catalog plus `count` generated episodes in series of 60. */
-export function withStressEpisodes(base: FeedCatalog, count: number): FeedCatalog {
+export function withStressEpisodes(
+  base: FeedCatalog,
+  count: number,
+  mediaBase: string | null = null,
+): FeedCatalog {
   if (count <= 0) return base;
   const templates = [...base.items]
     .filter((item) => item.status === "published")
@@ -72,7 +106,11 @@ export function withStressEpisodes(base: FeedCatalog, count: number): FeedCatalo
       const episodeNumber = e + 1;
       const template = templates[(s * STRESS_EPISODES_PER_SERIES + e) % templates.length];
       if (!template) continue;
-      const poster = `${template.playback.posterReference}?stress=${seriesNumber}-${episodeNumber}`;
+      const poster = onMediaHost(
+        `${template.playback.posterReference}?stress=${seriesNumber}-${episodeNumber}`,
+        mediaBase,
+      );
+      const video = onMediaHost(template.playback.reference, mediaBase);
       items.push({
         ...template,
         id: `item_stress_${seriesNumber}_${episodeNumber}`,
@@ -82,7 +120,14 @@ export function withStressEpisodes(base: FeedCatalog, count: number): FeedCatalo
         episodeSlug: `episode-${episodeNumber}`,
         seriesTitle: title,
         thumbnailUrl: poster,
-        playback: { ...template.playback, posterReference: poster },
+        videoUrl: video,
+        captions: template.captions.map((track) => ({ ...track, url: onMediaHost(track.url, mediaBase) })),
+        playback: {
+          ...template.playback,
+          reference: video,
+          posterReference: poster,
+          shareCardReference: onMediaHost(template.playback.shareCardReference, mediaBase),
+        },
         order: STRESS_ORDER_OFFSET + items.length,
         // Below every real episode, like a long tail of the catalog.
         editorialPriority: 0,

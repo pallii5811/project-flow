@@ -71,7 +71,23 @@ Per series, in `content/series/<slug>/`:
 - `audioStream` is only needed when a master carries several audio streams. Without it the
   gate refuses to guess, because the second stream is usually music and effects.
 - `episodeDurationMs` narrows the default range (30 s – 180 s) for a series that is
-  deliberately shorter or longer.
+  deliberately shorter or longer. The compilation splitter uses the same range: it never
+  proposes an episode outside it.
+- `splitAllowed` and `splitPermission` are needed **only** when the delivery is one long
+  file to be cut into episodes (§7). Cutting a work is an alteration of it, so the
+  licence has to say it is allowed:
+
+  ```json
+  "splitAllowed": true,
+  "splitPermission": {
+    "grantedOn": "2026-09-19",
+    "source": "email from the studio, 19 Sep 2026: 'you may split the compilation'"
+  }
+  ```
+
+  Without both, `scripts/split-compilation.mjs split` refuses and nothing is cut. The
+  date and the source are not decoration: they are where to look when the studio asks
+  what was published and under which permission.
 
 ## 2. The commands
 
@@ -81,6 +97,18 @@ node scripts/ingest-series.mjs signal-night    # one series
 node scripts/ingest-series.mjs signal-night --force   # re-encode even if unchanged
 npm run proof:gate                             # prove the pipeline on deliberately broken deliveries (CI runs it)
 node scripts/package-episode.mjs <master> <out-dir>   # one episode, for a quick look
+npm run check:ffmpeg                           # does this ffmpeg have what the gate needs?
+```
+
+One delivery that is a whole series in one file, or a delivery that must never touch the
+owner's connection, goes through §7 and `docs/cloud-ingest.md` instead:
+
+```bash
+npm run split -- propose <slug> --input <file>   # where are the episodes? (writes contact sheets)
+npm run split -- split <slug> --input <file>     # cut them, on a confirmed cuts file
+npm run ingest:cloud -- <slug> --source <file>   # cut + package + upload + manifest, inside a time budget
+npm run proof:split                              # a compilation with known boundaries (CI runs it)
+npm run proof:cloud                              # a link, a media store, the whole path twice (CI runs it)
 ```
 
 **A refused delivery changes nothing that is published.** Everything — renditions,
@@ -198,6 +226,10 @@ do, by reason:
 | `missing_caption_file`, `no_cues` | Ask for the subtitle file. Never publish with captions marked ready and no file |
 | `drifts_past_the_end`, `stops_too_early` | The file is for another cut or another frame rate. Ask for the one that matches the delivered master |
 | `too_many_bytes`            | The master is unusually noisy; ask for a cleaner grade, or the ladder needs a decision |
+| `split_not_allowed`, `split_permission_*` | The licence does not say the file may be cut into episodes: get the studio's written OK, then fill `splitAllowed` and `splitPermission` (§1) |
+| `cuts_not_confirmed`        | Nobody checked the contact sheets yet (§7)                                   |
+| `cuts_other_file`, `cuts_label`, `cuts_count`, `cuts_length` | The cuts file does not match the delivered file, or was half edited: §7 |
+| `master_provenance_mismatch` | A master was replaced by hand next to the provenance of a split: cut it again |
 
 Nothing here is fixed by relaxing a rule. A rule is changed only with a new entry in
 `docs/decisions.md` and a test that changes with it.
@@ -227,13 +259,101 @@ every video, poster, share card and caption URL must resolve inside `apps/web/ou
 - The share card carries the picture only. Adding the title and "Ep N" needs a font file in
   the repository, which is not there yet; the crawler shows the title and hook as text next
   to the card.
-- Media is published inside the static export. A real catalog does not fit there (about 191
-  files per 90-second episode, against Cloudflare Pages' 20,000 files per deploy), so
-  zero-egress storage with a media base URL is the next step — the manifests already hold
-  every URL in one place, which is what makes that change small.
+- Media is published inside the static export **unless the media store is configured**
+  (§8): a real catalog does not fit in the export (about 191 files per 90-second episode,
+  against Cloudflare Pages' 20,000 files per deploy).
 - Posters are WebP only. Browsers older than Safari 14 (2020) would see no poster; the video
   still plays.
 - The stand-in pack under `content/series/signal-night/` is generated in this repository by
   `scripts/make-standin-masters.mjs` (colour beds and an audio bed). It is not drama, and it
   is deliberately delivered at five different loudnesses so the normalisation has something
   to correct.
+
+## 7. One file that is a whole series
+
+Some studios deliver a mini-series as one 90-minute file: dozens of one-to-three-minute
+episodes glued together. `scripts/split-compilation.mjs` proposes where the episodes
+begin; **a person decides**; then it cuts.
+
+```bash
+npm run split -- propose night-shift --input delivery.mp4      # nothing is cut
+# look at .split-work/night-shift/contact/*.jpg and report.txt
+# fix any frame, set "confirmed": true, commit as content/series/night-shift/cuts.json
+npm run split -- split night-shift --input delivery.mp4        # writes masters/episode-N.mp4
+npm run ingest -- night-shift
+```
+
+What the proposal is made of, and what each piece is worth:
+
+| Evidence                  | How exact          | How much it means                                                                 |
+| ------------------------- | ------------------ | ---------------------------------------------------------------------------------- |
+| black between episodes    | to the frame       | strong: a compilation puts black, or a fade to black, between episodes            |
+| a pause in the sound      | to about a second  | strong, but it only says "around here": the frame comes from the picture cut in it |
+| a picture cut (`scdet`)   | to the frame       | **weak alone**: drama cuts between shots every few seconds, and an episode boundary looks exactly the same |
+| the brightness curve      | —                  | tells a fade to black from a cut to black; it describes black, it does not find it |
+| how long an episode may be | —                 | the cuts are chosen together, as the set that best explains the file with episodes of a regular length inside `episodeDurationMs` |
+
+Each cut carries its own verdict, and the report puts the ones to look at first:
+
+- **HIGH** — black of two frames or more, a fade into black, or a long silence around a
+  picture cut, with nothing else nearby that looks as good;
+- **LOW** — a picture cut, or a rival within five seconds. It may well be right; a shot
+  change looks the same, so a person must say;
+- **NONE** — nothing visible or audible (episodes that dissolve into each other): the cut
+  sits where the lengths want it, which is a guess.
+
+Measured on a compilation built here with known boundaries (`npm run proof:split`): the
+fade to black, the five frames of black and the silence are found **to the frame**; the two
+hard cuts are found to the frame as well but marked LOW, naming the shot change that looks
+like them; the cross-dissolve is marked NONE and lands 8 frames from the middle of the
+dissolve, for a person to correct.
+
+Other rules of the splitter:
+
+- **`frame` is the truth, `at` is its label.** A file where they disagree is refused
+  (`cuts_label`): it is what a half-finished hand edit looks like.
+- **The cuts belong to one file.** The delivered file's sha256 is in the cuts file; another
+  file behind the same link is refused (`cuts_other_file`) before anything is encoded.
+- **Episodes are contiguous**: what is between two episodes (black, a logo) stays at the end
+  of the first one. `startFrame` and `endFrame` drop a leader or a trailer.
+- **Never a stream copy.** Cutting on keyframes only would move every boundary by up to a
+  GOP; each episode is re-encoded from the exact frame (CRF 16, `veryfast`, FLAC audio) into
+  `masters/`, and the frame count of what was written is checked against the cuts.
+- **A horizontal file with a vertical picture in the middle** (a 9:16 cut exported into a
+  16:9 frame) is reported, never fixed silently: the report says so and offers a crop, which
+  has to be turned on by hand (`"crop": { …, "apply": true }`). The result is about 608×1080
+  — under the curation height, so the series also has to declare `allowBelow1080p`. Two
+  deliberate steps, because the right fix is to ask the studio for the vertical master.
+- Next to each master the splitter writes `<master>.source.json`: which frames of which file
+  it is. That is the episode's identity — so the same episode cut again, on another machine
+  where the re-encode is not byte-identical, is still recognised as published.
+- Not done: a single subtitle file for the whole compilation is not cut into per-episode
+  files. Subtitles are delivered per episode.
+
+## 8. Media on a store instead of in the export
+
+When `MEDIA_BASE_URL` and the R2 keys are set (`docs/cloud-ingest.md`), ingest publishes
+nothing under `apps/web/public`: every episode that passes the gate is uploaded to the
+bucket as soon as it is packaged, and the manifest carries absolute URLs on that host.
+With none of them set, everything works exactly as in §2.
+
+- **Everything on the store is named by its content**: renditions in their revision folder
+  (as in the export), posters, share cards and subtitles with the first 12 characters of
+  their own sha256 in the name. So no object ever changes, every one is cached for a year,
+  an upload is skipped when the object is already there, and a re-delivery switches the
+  whole series in one deploy — a recut never shows new subtitles over old video.
+- **The master playlist of an encode is uploaded last.** Its presence therefore proves the
+  whole folder is there, which is what lets a later run know, with one question, that an
+  episode is published.
+- **The record of what is published lives in `.ingest-records/`** (git-ignored; the workflow
+  keeps it in the Actions cache). Lose it and nothing breaks: the next run re-encodes and
+  finds the objects already on the store.
+- `--only 3,5-7` packages part of a series and ends "INCOMPLETE" (exit 3) without writing a
+  manifest, so a series longer than one runner job is published over several runs. `--status`
+  prints what is already on the store. `--free-disk` deletes each episode's local files once
+  they are up.
+- **Nothing is ever deleted from the store.** A Pages build takes minutes to go live, and
+  deleting what the live manifest still names would break playback for whoever is watching.
+- `npm run export:web` refuses a catalog whose media is on a host that is not
+  `MEDIA_BASE_URL` for that build — the security policy would block it and nothing would
+  play.

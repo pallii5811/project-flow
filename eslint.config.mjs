@@ -27,6 +27,8 @@ export default tseslint.config(
         URL: "readonly",
         fetch: "readonly",
         setTimeout: "readonly",
+        // Timeouts on uploads to the media store (scripts/lib/r2.mjs).
+        AbortSignal: "readonly",
       },
     },
   },

@@ -14,6 +14,26 @@ export function isHlsSource(mimeType: string, uri: string): boolean {
   return path.toLowerCase().endsWith(".m3u8");
 }
 
+/**
+ * Does this media element need `crossorigin`? Since media may be served from
+ * MEDIA_BASE_URL instead of the export (docs/cloud-ingest.md), a subtitle
+ * track can be on another host — and a browser refuses to read a text track
+ * from another host unless the element asks for it with CORS. It refuses
+ * silently: the track simply never has cues, and a muted viewer sees nothing.
+ *
+ * Judged on the URLs alone, never on `window`, so the server renders the same
+ * attribute the browser expects: everything the export serves is a path
+ * ("/content/…"), everything on the media host is absolute.
+ */
+export function needsCrossOriginMedia(urls: readonly (string | null | undefined)[]): boolean {
+  return urls.some((url) => isCrossOriginMedia(url));
+}
+
+/** Everything the export serves is a path; everything on the media host is absolute. */
+export function isCrossOriginMedia(url: string | null | undefined): boolean {
+  return typeof url === "string" && /^https?:\/\//i.test(url.trim());
+}
+
 export type HlsEngine = "native" | "hlsjs" | "unsupported";
 
 export type HlsEnvironment = {

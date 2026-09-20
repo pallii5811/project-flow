@@ -23,7 +23,7 @@
  * Nothing touches the repository: deliveries, published assets, the stage and
  * manifests all go to a temporary folder.
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -39,6 +39,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { startFakeMediaStore } from "./lib/fake-media-store.mjs";
+import { IMMUTABLE } from "./lib/platform.mjs";
+import { MEDIA_ENV } from "./lib/media-publish.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const source = join(repoRoot, "content", "series", "signal-night");
@@ -234,12 +238,43 @@ function caseRoots(name) {
           "--generated-root",
           join(root, "generated"),
         ],
-        { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
+        // Media in the export: whatever this machine's environment says.
+        { encoding: "utf8", maxBuffer: 32 * 1024 * 1024, env: exportEnv },
       );
       return { accepted: result.status === 0, output: `${result.stdout ?? ""}${result.stderr ?? ""}` };
     },
+    /** Ingest with media on the (fake) store; async, because the store answers from this process. */
+    ingestToStore(env, extra = []) {
+      return new Promise((done) => {
+        const child = spawn(
+          process.execPath,
+          [
+            join(repoRoot, "scripts", "ingest-series.mjs"),
+            SLUG,
+            "--delivery-root",
+            join(root, "delivery"),
+            "--publish-root",
+            join(root, "published"),
+            "--generated-root",
+            join(root, "generated"),
+            ...extra,
+          ],
+          { env: { ...exportEnv, ...env } },
+        );
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk) => (stdout += chunk));
+        child.stderr.on("data", (chunk) => (stderr += chunk));
+        child.on("close", (code) => done({ code, accepted: code === 0, stdout, output: `${stdout}${stderr}` }));
+      });
+    },
   };
 }
+
+/** The environment without any media-store variable: the export cases stay export cases. */
+const exportEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([name]) => !MEDIA_ENV.includes(name) && name !== "R2_ENDPOINT"),
+);
 
 /** Every published file and the generated manifest, by content. */
 function snapshot(roots) {
@@ -553,6 +588,171 @@ acceptance(
     `second run ${/packaged now: (\d+)/.exec(right.output)?.[0] ?? "refused"}, published audioStream ${stream}`,
     `${wrong.output}\n${right.output}`,
   );
+}
+
+// --- media on R2 (docs/cloud-ingest.md) --------------------------------------
+// The real ingest, against a local store that checks every signature the way
+// R2 does and serves what it holds the way a public bucket domain does.
+{
+  const credentials = { bucket: "proof-media", accessKeyId: "AKIDPROOF", secretAccessKey: "proof-secret-never-printed" };
+  const store = await startFakeMediaStore({ ...credentials, allowedOrigins: ["*"] });
+  const env = {
+    MEDIA_BASE_URL: store.endpoint,
+    R2_ENDPOINT: store.endpoint,
+    R2_ACCESS_KEY_ID: credentials.accessKeyId,
+    R2_SECRET_ACCESS_KEY: credentials.secretAccessKey,
+    R2_BUCKET: credentials.bucket,
+  };
+  const manifestOf = (roots) => {
+    const path = join(roots.generated, `${SLUG}.ts`);
+    return existsSync(path) ? readFileSync(path, "utf8") : null;
+  };
+  const urlsIn = (text) => [...(text ?? "").matchAll(/"(https?:\/\/[^"]+)"/g)].map((match) => match[1]);
+  /** Every URL of the manifest, and every segment its playlists name, is on the store's public side. */
+  const closure = async (text) => {
+    const problems = [];
+    let objects = 0;
+    for (const url of urlsIn(text)) {
+      const response = await fetch(url);
+      objects += 1;
+      if (response.status !== 200) {
+        problems.push(`${url} answered ${response.status}`);
+        continue;
+      }
+      if (response.headers.get("cache-control") !== IMMUTABLE) problems.push(`${url} is not cached for a year`);
+      if (!url.endsWith("master.m3u8")) continue;
+      for (const variant of (await response.text()).split("\n").filter((line) => line && !line.startsWith("#"))) {
+        const variantUrl = new URL(variant, url).href;
+        const playlist = await fetch(variantUrl);
+        objects += 1;
+        const body = await playlist.text();
+        const names = [
+          ...body.split("\n").filter((line) => line && !line.startsWith("#")),
+          ...[...body.matchAll(/URI="([^"]+)"/g)].map((match) => match[1]),
+        ];
+        for (const name of names) {
+          const head = await fetch(new URL(name, variantUrl).href, { method: "HEAD" });
+          objects += 1;
+          if (head.status !== 200) problems.push(`${name} of ${variant} is missing`);
+        }
+      }
+    }
+    return { problems, objects };
+  };
+
+  // 1. A delivery goes to the store; the manifest points there; nothing lands in the export.
+  const roots = caseRoots("r2");
+  roots.deliver({ masterBuilders: { 1: masters.good, 2: masters.other } });
+  const first = await roots.ingestToStore(env);
+  const firstManifest = manifestOf(roots);
+  {
+    const problems = [];
+    if (!first.accepted) problems.push("refused");
+    const urls = urlsIn(firstManifest);
+    if (urls.length === 0 || urls.some((url) => !url.startsWith(`${store.endpoint}/content/series/${SLUG}/`))) {
+      problems.push(`the manifest does not point at MEDIA_BASE_URL: ${urls.slice(0, 2).join(", ")}`);
+    }
+    if (/"\/content\/series\//.test(firstManifest ?? "")) problems.push("the manifest still names export paths");
+    if (existsSync(join(roots.published, SLUG))) problems.push("files were written into the export");
+    const { problems: missing, objects } = first.accepted ? await closure(firstManifest) : { problems: [], objects: 0 };
+    problems.push(...missing);
+    // master.m3u8 goes last in each folder: a playlist never names a missing segment.
+    const puts = store.log.filter((entry) => entry.method === "PUT" && entry.status === 200).map((entry) => entry.key);
+    for (const key of puts.filter((name) => name.endsWith("/master.m3u8"))) {
+      const folder = key.slice(0, -"master.m3u8".length);
+      const lastOfFolder = puts.filter((name) => name.startsWith(folder)).pop();
+      if (lastOfFolder !== key) problems.push(`${folder} was not finished by its master playlist`);
+    }
+    record(
+      "media on R2: a delivery is published to the store and the manifest points there",
+      problems.length === 0,
+      problems.join("; ") || `${puts.length} objects uploaded, ${objects} fetched back through the public side, all cached for a year; nothing in the export`,
+      first.output,
+    );
+  }
+
+  // 2. The same delivery again: nothing encoded, nothing uploaded, manifest unchanged.
+  store.log.length = 0;
+  const again = await roots.ingestToStore(env);
+  const puts = store.log.filter((entry) => entry.method === "PUT").length;
+  record(
+    "media on R2: the same delivery again encodes and uploads nothing",
+    again.accepted && /packaged now: 0/.test(again.output) && puts === 0 && manifestOf(roots) === firstManifest,
+    `packaged now ${/packaged now: (\d+)/.exec(again.output)?.[1] ?? "?"}, ${puts} PUT, ${store.log.filter((entry) => entry.method === "HEAD").length} HEAD, manifest ${manifestOf(roots) === firstManifest ? "unchanged" : "CHANGED"}`,
+    again.output,
+  );
+
+  // 3. A refused re-delivery writes no manifest; what it pointed at stays on the store.
+  masters.recut(join(roots.delivery, "masters", "episode-1.mp4"));
+  writeFileSync(
+    join(roots.delivery, "captions", "episode-2.en.vtt"),
+    "WEBVTT\n\n00:00:00.500 --> 00:00:02.500\nSomething is wrong.\n",
+  );
+  const refusedRun = await roots.ingestToStore(env);
+  const stillThere = await closure(firstManifest);
+  record(
+    "media on R2: a refused re-delivery changes no manifest, and the published objects stay",
+    !refusedRun.accepted && refusedRun.output.includes("[stops_too_early]") && manifestOf(roots) === firstManifest &&
+      stillThere.problems.length === 0,
+    `${refusedRun.accepted ? "ACCEPTED" : "refused"}, manifest ${manifestOf(roots) === firstManifest ? "byte-identical" : "CHANGED"}, ${stillThere.objects} published objects still served`,
+    refusedRun.output,
+  );
+
+  // 4. A series longer than one run: --only, incomplete until the last run.
+  {
+    const long = caseRoots("r2-long");
+    long.deliver({
+      masterBuilders: {
+        1: masters.good,
+        2: (target) => cpSync(join(source, "masters", "episode-2.mp4"), target),
+        3: masters.other,
+      },
+    });
+    const part = await long.ingestToStore(env, ["--only", "1"]);
+    const status = await long.ingestToStore(env, ["--status"]);
+    let onStore = null;
+    try {
+      onStore = JSON.parse(status.stdout).onStore;
+    } catch {
+      onStore = null;
+    }
+    const rest = await long.ingestToStore(env, ["--only", "2-3", "--free-disk"]);
+    const manifest = manifestOf(long);
+    const episodes = [...(manifest ?? "").matchAll(/"episodeNumber": (\d+)/g)].length;
+    record(
+      "media on R2: a series published over several runs is incomplete until the last",
+      part.code === 3 && /INCOMPLETE/.test(part.output) && onStore === 1 && rest.accepted && episodes === 3 &&
+        /packaged now: 2/.test(rest.output) && /unchanged: 1/.test(rest.output) &&
+        !existsSync(join(long.root, ".ingest-stage", SLUG)),
+      `first run exit ${part.code} (${/INCOMPLETE/.test(part.output) ? "incomplete, no manifest" : "?"}), status ${onStore}/3 on the store, ` +
+        `second run ${rest.accepted ? `ok, ${episodes} episodes` : "refused"}`,
+      `${part.output}\n${status.output}\n${rest.output}`,
+    );
+  }
+
+  // 5. Half configured, or a wrong key: refused, saying why, printing no secret.
+  {
+    const half = caseRoots("r2-half");
+    half.deliver({ masterBuilders: { 1: masters.good } });
+    const run = await half.ingestToStore({ MEDIA_BASE_URL: store.endpoint, R2_SECRET_ACCESS_KEY: credentials.secretAccessKey });
+    record(
+      "media on R2: a half-configured environment is refused, naming what is missing, printing no secret",
+      !run.accepted && run.output.includes("R2_BUCKET") && !run.output.includes(credentials.secretAccessKey) && manifestOf(half) === null,
+      run.accepted ? "ACCEPTED" : "refused before any work",
+      run.output,
+    );
+    const wrong = caseRoots("r2-wrong-key");
+    wrong.deliver({ masterBuilders: { 1: masters.good } });
+    const denied = await wrong.ingestToStore({ ...env, R2_SECRET_ACCESS_KEY: "not-the-secret" });
+    record(
+      "media on R2: a wrong key stops the run with the store's answer, no manifest",
+      !denied.accepted && /answered 403 \(the R2 token/.test(denied.output) &&
+        !denied.output.includes("not-the-secret") && manifestOf(wrong) === null,
+      denied.accepted ? "ACCEPTED" : `stopped: ${/answered 403[^)]*\)/.exec(denied.output)?.[0] ?? "?"}`,
+      denied.output,
+    );
+  }
+  await store.close();
 }
 
 console.error("\ngate-proof: one delivery per rule\n");

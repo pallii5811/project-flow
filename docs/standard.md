@@ -15,6 +15,7 @@ episodes free, then paywall with coins or subscriptions of up to $19.99 a week.
 | Ads only inside the Ad Charter (section 2)                                      | Enforced in code: 26 tests, each rule proven by a sabotage run. No ads shown yet                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | A shared link opens the exact episode, with a correct preview card              | Holds: absolute preview URLs; `npm run export:web` refuses an export pointing elsewhere (proven on a localhost build). Since 2026-09-18 the card is the landscape 1200×630 image ingest builds from the episode frame, declared with width, height and alt, instead of the 9:16 poster crawlers cut to a band; the export check refuses a page whose preview is not landscape. Since 2026-09-18 (batch 5) every episode page has its own title ("Signal Night · Episode 3") and share title ("Signal Night · Ep. 3: …"), `og:type` video.episode, `og:site_name` and a canonical address on the configured site, and a share is built on `NEXT_PUBLIC_SITE_URL`, never on the host that served the page (a `pages.dev` preview, a mirror): `npm run export:web` refuses duplicate titles or a canonical elsewhere, `npm run e2e:web:platform` clicks Share and reads the link. Real crawler rendering (X, WhatsApp) is not tested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Contextual ads only, no personal profiling                                      | Holds by design                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| A studio's delivery becomes a published series without the owner downloading it | Holds for the whole path, proven without a studio file: a link is downloaded on a runner, a 90-minute file glued from episodes is cut where a person confirmed, each episode is packaged, uploaded to zero-egress storage and its local copy deleted, and only a manifest comes back (`npm run proof:cloud`, `npm run proof:split`, `npm run proof:gate`). A catalog whose media sits on another host plays in a browser, with its subtitles, and breaks no security policy (`npm run e2e:web:scale`, check 46). Measured cost, not guessed: the run prints its runner minutes. No real studio delivery has gone through it yet |
 | Picture adapts to the network; nothing downloaded beyond current + next episode | Holds on the stand-in pack: HLS, 2 s segments; at a cold open the next episode fetches only its first 4 s and nothing beyond it is fetched (`npm run e2e:web`). At open only 3 posters are fetched and at most 5 slides hold a poster or a player, whatever the catalog size (`npm run e2e:web:scale`). Safari's native path is not tested yet                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Subtitles in the viewer's language                                              | Partial: English, and Spanish on one episode. Drawn by the app above the title block, on by default while muted, and an explicit choice is remembered (`npm run e2e:web`); 8.0:1 contrast over a white frame, pinned by a test on the shipped CSS. Since 2026-09-18 a track is marked ready only if its file parses, its cues fit the measured duration (no drift past the end, no stop before 60% of the episode, at least 30% covered) and its language is one the licence covers and it is on disk in the export; `npm run export:web` refuses an export whose catalog promises a caption file that is not there. Real phones and Safari not tested yet                                                                                                                                                                                                                                                                                                                                                   |
 | Reasons to return tomorrow (follow survives reload, new-episode alerts)         | **Partial.** The place in a story survives reload, one per series (a shared link into another series keeps it), and a viewer who finished an episode reopens on the next one (`npm run e2e:web`). Like and follow live in memory only; no new-episode alerts. Since 2026-09-18 the site installs to the home screen (manifest Chrome accepts with no installability error, 192/512/maskable icons and an apple-touch-icon from one mark, standalone portrait, `npm run e2e:web:platform`); a one-time invitation appears only after two finished episodes and a minute, never again whatever the answer, and a launch from the home screen is counted (`utm_source=homescreen`, `display_mode` on `page_view`). Installing on a real phone is not tested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -214,6 +215,55 @@ year of cache in the table above would have been lost (the local server applied 
 and showed it). The file now writes each pattern once and the local server reads it the
 way Pages does, so the table holds for what Pages will be sent; step 7 of
 `docs/deploy.md` reads it on the real edge after the first deploy.
+
+Cloud ingest, 2026-09-20 (one delivery, from a link to a published series). Measured on
+this machine (Ryzen 9 5900X, ffmpeg 8.0.1), with packaging pinned to **two cores** to stand
+for a GitHub runner, on a 30-second 1080×1920 clip at 6.4 Mbps built for the purpose (a
+colour bed with grain and motion — a real drama frame compresses differently, so these
+numbers bound the shape of the cost, not its exact value):
+
+| Step, per second of video                    | 12 cores | 2 cores | What it is                                        |
+| -------------------------------------------- | -------- | ------- | --------------------------------------------------- |
+| analysis pass (black, silence, cuts, bars)   | —        | 0.26 s  | once per delivery, in propose-cuts mode             |
+| cutting one episode out (CRF 16, veryfast)   | —        | 0.72 s  | once per episode                                    |
+| packaging the ladder (4 rungs, preset slow)  | 0.74 s   | 2.78 s  | the cost that matters                               |
+
+So a minute of 1080×1920 video costs about **3.5 minutes of two cores** here (packaging
+plus the cut), and a 90-minute series about **5 hours** on this machine. A GitHub runner's
+two processors are two threads of one core at a lower clock, so it will be slower — the
+guide says 5 to 10 hours and about one 90-minute series a month inside the free 2,000
+minutes, deliberately pessimistic. **This is the only number here that is an estimate**:
+every run prints the minutes it really used, and the first real delivery replaces it.
+
+The stand-in pack, same machine, 12 cores: 3.4–3.9 s per 10-second 720×1280 episode
+(3 rungs), 50.7 s for the five cold.
+
+A lever, measured on the same clip and the same two cores, **not taken**: `-preset medium`
+packages in 62 s instead of 83 s (−25%) for 8% more bytes; `fast` in 58 s for 26% more
+bytes. Bytes are the viewer's data plan (docs/business-model.md), so the preset stays
+`slow` until someone decides otherwise with a new entry in the decision log.
+
+Compilation splitter, 2026-09-20 (`npm run proof:split`, a 66-second file built from the
+stand-in episodes with a shot change inside every episode, as strong as a boundary):
+
+| Transition between episodes          | Where it landed        | What it said                                   |
+| ------------------------------------- | ---------------------- | ------------------------------------------------ |
+| fade to black                        | exact (frame 480/480)  | HIGH: "fade to black, 0.16 s of black ending here" |
+| five frames of black                 | exact (735/735)        | HIGH: "cut to black, 0.20 s of black"             |
+| 0.8 s of silence                     | exact (955/955)        | HIGH: "picture cut + 0.80 s of silence"           |
+| hard cut, twice                      | exact (250, 1420)      | LOW, naming the shot change 4 s away              |
+| one-second cross-dissolve            | 8 frames from the middle | NONE: "nothing visible or audible"              |
+
+13 picture cuts were found in that file; 6 of them are inside episodes. The splitter never
+took one of those, and never called a cut it could not see a sure one.
+
+Media on a store, 2026-09-20 (`npm run proof:gate`, the R2 cases, against a local stand-in
+that checks every signature): a two-episode series uploads 50 objects, every URL of the
+manifest is fetched back from the store's public side and answers with a year of cache; the
+same delivery again uploads nothing and encodes nothing (8 questions, 0 writes); a refused
+re-delivery leaves the manifest byte-identical and everything published still served; a
+three-episode series published over two runs is "incomplete" until the last one; a
+half-configured environment and a wrong key stop the run by name, never printing a secret.
 
 ## 4. Definition of done
 

@@ -19,8 +19,14 @@ jobs:
       - run: npm run lint
       - run: npm run test
       # The content pipeline on real files: every gate rule refused on purpose,
-      # real endings accepted, and a refused re-delivery proven to leave the
-      # published series byte for byte as it was.
+      # real endings accepted, a refused re-delivery proven to leave the
+      # published series byte for byte as it was, and the media store path
+      # (upload, skip, resume, a wrong key) against a local stand-in for R2.
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm run proof:gate
+      # A compilation with known boundaries: every cut the splitter can see, to
+      # the frame, and the ones it cannot marked as such (docs/content-operations.md §7).
+      - run: npm run proof:split
+      # The cloud path end to end: a link, a media store, the whole run twice.
+      - run: npm run proof:cloud

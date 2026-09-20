@@ -10,11 +10,45 @@ import {
   buildHlsWarmupScript,
   chooseHlsEngine,
   isHlsSource,
+  isCrossOriginMedia,
   isSafariUserAgent,
+  needsCrossOriginMedia,
   planHlsLoad,
   shouldWarmHlsEngine,
   startQuality,
 } from "./hlsSupport";
+
+describe("needsCrossOriginMedia — a subtitle from another host needs CORS, or it never loads", () => {
+  it("asks for nothing while media is served by the site itself", () => {
+    expect(
+      needsCrossOriginMedia([
+        "/content/series/signal-night/hls/episode-1/ab12cd34ef56/master.m3u8",
+        "/content/series/signal-night/captions/episode-1.en.vtt",
+      ]),
+    ).toBe(false);
+    expect(needsCrossOriginMedia([])).toBe(false);
+    expect(needsCrossOriginMedia([null, undefined])).toBe(false);
+  });
+
+  it("asks for it as soon as one URL is on the media host", () => {
+    expect(
+      needsCrossOriginMedia([
+        "https://media.cliffies.app/content/series/x/hls/episode-1/ab12cd34ef56/master.m3u8",
+        "/content/series/x/captions/episode-1.en.vtt",
+      ]),
+    ).toBe(true);
+    // Video in the export, subtitles on the media host: still needed.
+    expect(
+      needsCrossOriginMedia(["/content/x.m3u8", "https://media.cliffies.app/content/x.en.vtt"]),
+    ).toBe(true);
+  });
+
+  it("tells one URL from the other, which is how the poster stays out of CORS", () => {
+    expect(isCrossOriginMedia("https://media.cliffies.app/content/x.webp")).toBe(true);
+    expect(isCrossOriginMedia("/content/series/x/posters/episode-1.webp")).toBe(false);
+    expect(isCrossOriginMedia(null)).toBe(false);
+  });
+});
 
 describe("isHlsSource", () => {
   it("recognizes HLS by MIME type or by playlist extension", () => {

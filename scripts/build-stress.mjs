@@ -9,6 +9,12 @@
  * build cannot be published by mistake (scripts/deploy-checks.mjs also refuses
  * FLOW_STRESS_EPISODES). Run `npm run build:web` again before `npm run e2e:web`:
  * both builds share apps/web/.next.
+ *
+ * The generated episodes' media is addressed on a second origin (the port
+ * `npm run e2e:web:scale` serves with a bucket's CORS headers), because that
+ * is how media published to R2 reaches a viewer: the scale run then proves in
+ * a browser that such a catalog plays, shows its subtitles and breaks no
+ * security policy. `--media-base ""` keeps everything on one origin.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, renameSync, rmSync } from "node:fs";
@@ -19,7 +25,10 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const webDir = resolve(repoRoot, "apps/web");
 const outDir = resolve(webDir, "out");
 const stressDir = resolve(webDir, "out-stress");
-const episodes = process.argv[2] ?? "600";
+const episodes = process.argv.slice(2).find((arg) => !arg.startsWith("--")) ?? "600";
+const mediaBaseAt = process.argv.indexOf("--media-base");
+/** Must match MEDIA_ORIGIN in scripts/e2e-feed.mjs. */
+const mediaBase = mediaBaseAt === -1 ? "http://localhost:3219" : (process.argv[mediaBaseAt + 1] ?? "");
 
 if (!/^\d+$/.test(episodes) || Number(episodes) <= 0) {
   console.error(`build-stress: episode count must be a positive whole number, got "${episodes}"`);
@@ -32,7 +41,14 @@ const started = Date.now();
 const result = spawnSync(process.execPath, [nextBin, "build"], {
   cwd: webDir,
   stdio: "inherit",
-  env: { ...process.env, FLOW_STRESS_EPISODES: episodes },
+  env: {
+    ...process.env,
+    FLOW_STRESS_EPISODES: episodes,
+    FLOW_STRESS_MEDIA_BASE: mediaBase,
+    // The security policy of the export must allow that origin, or nothing
+    // generated would play (scripts/finish-export.mjs writes it).
+    ...(mediaBase ? { MEDIA_BASE_URL: mediaBase } : {}),
+  },
 });
 if (result.status !== 0) {
   console.error("build-stress: next build failed");
@@ -46,6 +62,8 @@ if (!existsSync(outDir)) {
 for (const step of ["scripts/link-hls-engine.mjs", "scripts/finish-export.mjs"]) {
   const done = spawnSync(process.execPath, [resolve(repoRoot, step), outDir], {
     stdio: "inherit",
+    // finish-export writes the security policy: it must know the media origin.
+    env: { ...process.env, ...(mediaBase ? { MEDIA_BASE_URL: mediaBase } : {}) },
   });
   if (done.status !== 0) process.exit(done.status ?? 1);
 }

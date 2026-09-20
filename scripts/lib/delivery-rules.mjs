@@ -178,11 +178,58 @@ function sameOptions(a, b) {
  */
 export function isPackageCurrent(record, expected) {
   if (typeof record !== "object" || record === null) return false;
+  // A record carries `sourceIdentity` only when the episode is not a whole
+  // file — when it is frames of a compilation (sourceIdentity above). For
+  // every other master the identity IS the hash of its bytes, which is what
+  // package-episode recorded, so older records keep working unchanged.
+  const recorded = typeof record.sourceIdentity === "string" ? record.sourceIdentity : record.sourceSha256;
   return (
-    record.sourceSha256 === expected.sourceSha256 &&
+    recorded === expected.sourceSha256 &&
     record.gateVersion === expected.gateVersion &&
     sameOptions(record.gateOptions, expected.gateOptions)
   );
+}
+
+/**
+ * Who an episode's master is, for the duplicate check and for "already
+ * packaged?". A master cut from a compilation carries a provenance file
+ * (<master>.source.json, written by scripts/split-compilation.mjs): it is
+ * identified by the frames it was cut from, so the same episode cut again —
+ * on another machine, where the re-encode is not byte-identical — is still
+ * the same episode, and a later run can tell it is published without
+ * splitting it again. Any other master is the sha256 of its bytes.
+ *
+ * @param {{ provenance: object|null, masterSha256: string|null, masterLabel: string }} source
+ * @returns {{ identity: string|null, masterPresent: boolean, issues: {code:string,message:string}[] }}
+ */
+export function sourceIdentity({ provenance, masterSha256, masterLabel }) {
+  const masterPresent = typeof masterSha256 === "string";
+  if (provenance === null || provenance === undefined) {
+    if (!masterPresent) {
+      return { identity: null, masterPresent, issues: [issue("missing_master", `no master at ${masterLabel}`)] };
+    }
+    return { identity: masterSha256, masterPresent, issues: [] };
+  }
+  if (typeof provenance !== "object" || !/^[0-9a-f]{64}$/.test(String(provenance.identity))) {
+    return {
+      identity: null,
+      masterPresent,
+      issues: [issue("bad_provenance", `${masterLabel}.source.json is not a provenance file: split the episode again`)],
+    };
+  }
+  if (masterPresent && provenance.masterSha256 !== masterSha256) {
+    return {
+      identity: null,
+      masterPresent,
+      issues: [
+        issue(
+          "master_provenance_mismatch",
+          `${masterLabel} is not the file the splitter wrote for frames ${String(provenance.startFrame)}–${String(provenance.endFrame)}: split it again`,
+        ),
+      ],
+    };
+  }
+  return { identity: provenance.identity, masterPresent, issues: [] };
 }
 
 /** A revision is 12 lowercase hex characters: a folder name, and part of a URL. */

@@ -14,7 +14,8 @@ import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pagesLimitProblems, platformProblems } from "./lib/platform-checks.mjs";
-import { isPublicLaunch } from "./lib/platform.mjs";
+import { isPublicLaunch, originOf } from "./lib/platform.mjs";
+import { mediaBaseProblems } from "./lib/media-publish.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const exportDir = resolve(repoRoot, "apps/web/out");
@@ -71,6 +72,23 @@ function checkEnv() {
     failures.push(`NEXT_PUBLIC_SITE_URL must be an origin without path: "${site.href}"`);
   }
 
+  // Media may live on another host (docs/cloud-ingest.md). If it does, this
+  // build's security policy must allow exactly that host, so the address has
+  // to be right here, at build time, not when a viewer presses play.
+  const mediaBaseUrl = process.env.MEDIA_BASE_URL?.trim();
+  if (mediaBaseUrl) {
+    for (const problem of mediaBaseProblems(mediaBaseUrl)) failures.push(problem);
+    const url = originOf(mediaBaseUrl);
+    if (url && new URL(mediaBaseUrl).hostname.endsWith(".r2.dev")) {
+      console.error(
+        "WARNING: MEDIA_BASE_URL is an r2.dev address. Cloudflare rate-limits it and does not cache it; " +
+          "connect a custom domain to the bucket before the beta grows (docs/cloud-ingest.md).",
+      );
+    } else if (url) {
+      console.error(`deploy-checks: media from ${url}`);
+    }
+  }
+
   if (process.env.FLOW_ALLOW_NO_ANALYTICS === "1") {
     console.error(
       "WARNING: FLOW_ALLOW_NO_ANALYTICS=1 — this export measures nothing. " +
@@ -98,14 +116,18 @@ function metaContent(html, key) {
 }
 
 /**
- * Every asset the catalog promises must be a file in the export (CP-1, CP-3).
- * A caption marked "ready" whose file was never copied shows no text, and the
- * catalog would still say it is there.
+ * Every asset the catalog promises must be reachable: a file in the export
+ * (CP-1, CP-3), or an object on MEDIA_BASE_URL — the one other origin this
+ * build's security policy allows. A caption marked "ready" whose file was
+ * never copied shows no text, and the catalog would still say it is there;
+ * a video on a host the policy does not allow is blocked in every browser.
  */
 function checkCatalogAssets(feedCatalog) {
   let checked = 0;
+  let remote = 0;
   const missing = [];
   const seen = new Set();
+  const mediaOrigin = originOf(process.env.MEDIA_BASE_URL);
   const require = (item, kind, url) => {
     if (typeof url !== "string" || url.length === 0) {
       missing.push(`${item.id}: ${kind} has no URL`);
@@ -113,6 +135,22 @@ function checkCatalogAssets(feedCatalog) {
     }
     // The stress catalog distinguishes posters with a query string.
     const path = url.split("?")[0];
+    if (/^https?:\/\//i.test(path)) {
+      // Media that left the export: ingest wrote these URLs (docs/cloud-ingest.md).
+      const origin = originOf(path);
+      if (!mediaOrigin) {
+        missing.push(
+          `${item.id}: ${kind} is on ${origin ?? path}, but MEDIA_BASE_URL is not set for this build: ` +
+            "the security policy would block it, and nothing would play",
+        );
+      } else if (origin !== mediaOrigin) {
+        missing.push(`${item.id}: ${kind} is on ${origin}, not on MEDIA_BASE_URL (${mediaOrigin})`);
+      } else if (!seen.has(path)) {
+        seen.add(path);
+        remote += 1;
+      }
+      return;
+    }
     if (!path.startsWith("/")) {
       missing.push(`${item.id}: ${kind} is not a site path: "${url}"`);
       return;
@@ -136,7 +174,10 @@ function checkCatalogAssets(feedCatalog) {
     }
   }
   for (const failure of missing) failures.push(failure);
-  console.error(`deploy-checks: ${checked} catalog assets resolved in the export`);
+  console.error(
+    `deploy-checks: ${checked} catalog assets resolved in the export` +
+      (remote > 0 ? `, ${remote} on ${originOf(process.env.MEDIA_BASE_URL)} (checked there by ingest, before it wrote the manifest)` : ""),
+  );
 }
 
 /**
@@ -165,6 +206,7 @@ function stripPackagingRecords() {
 function checkExport() {
   stripPackagingRecords();
   const site = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") ?? "";
+  const mediaBase = originOf(process.env.MEDIA_BASE_URL);
   if (!site) failures.push("NEXT_PUBLIC_SITE_URL is not set: cannot verify preview URLs");
 
   let files;
@@ -194,8 +236,11 @@ function checkExport() {
     }
     for (const key of ["og:image", "twitter:image", "og:url"]) {
       for (const value of metaContent(html, key)) {
-        if (site && !value.startsWith(`${site}/`)) {
-          failures.push(`${name} ${key} is not on ${site}: "${value}"`);
+        // The link-preview picture may sit on the media host; the page address
+        // never may (a share must point at the site the viewer opens).
+        const allowed = [site, ...(key === "og:url" ? [] : [mediaBase])].filter(Boolean);
+        if (site && !allowed.some((base) => value.startsWith(`${base}/`))) {
+          failures.push(`${name} ${key} is not on ${allowed.join(" or ")}: "${value}"`);
         }
       }
     }
