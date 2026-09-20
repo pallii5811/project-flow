@@ -30,3 +30,6 @@ jobs:
       - run: npm run proof:split
       # The cloud path end to end: a link, a media store, the whole run twice.
       - run: npm run proof:cloud
+      # The machine made for one series: made, used, and unmade after every way
+      # a run can end — including the orchestrator being killed mid-run.
+      - run: npm run proof:scaleway
