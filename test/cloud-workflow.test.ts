@@ -39,12 +39,37 @@ describe("the workflow the owner runs", () => {
     expect(workflow.concurrency.group).toContain("inputs.slug");
   });
 
-  it("asks for a series, its links and a mode, and nothing else", () => {
+  it("asks for a series, its links, a mode and which machine, and nothing else", () => {
     const inputs = workflow.on.workflow_dispatch.inputs;
-    expect(Object.keys(inputs).sort()).toEqual(["continuation", "links", "mode", "slug"]);
+    expect(Object.keys(inputs).sort()).toEqual(["continuation", "links", "mode", "runner", "slug"]);
     expect(inputs.slug.required).toBe(true);
     expect(inputs.links.required).toBe(true);
     expect(inputs.mode.options).toEqual(["propose-cuts", "publish"]);
+    // A machine made for the series is the default: on two free threads a
+    // 90-minute series eats most of a month (docs/standard.md §3).
+    expect(inputs.runner.options).toEqual(["scaleway", "github"]);
+    expect((inputs.runner as { default?: string }).default).toBe("scaleway");
+  });
+
+  it("does the heavy work in one place or the other, never in both", () => {
+    const heavy = steps.filter((step) =>
+      ["cloud-ingest.mjs", "run-on-scaleway.mjs", "fetch-delivery.mjs", "split-compilation.mjs"].some((script) =>
+        (step.run ?? "").includes(script),
+      ),
+    );
+    expect(heavy.length).toBeGreaterThan(0);
+    for (const step of heavy) {
+      expect(step.if ?? "").toMatch(/inputs\.runner == '(scaleway|github)'/);
+    }
+    // The pinned ffmpeg is only installed where the encoding happens.
+    const ffmpeg = steps.find((step) => (step.run ?? "").includes("FFMPEG_SHA256"));
+    expect(ffmpeg?.if).toBe("inputs.runner == 'github'");
+    // …and the machine the other path makes is paid for by the minute, so the
+    // job cannot simply end and forget it.
+    const sweep = steps.find((step) => (step.run ?? "").includes("--sweep"));
+    expect(sweep?.if).toContain("always()");
+    expect(sweep?.if).toContain("inputs.runner == 'scaleway'");
+    expect(sweep?.run).toContain('--run "$GITHUB_RUN_ID"');
   });
 
   it("may write the repository (the manifest) and start its own continuation", () => {
@@ -65,7 +90,7 @@ describe("the workflow the owner runs", () => {
 
   it("calls only scripts that exist here", () => {
     const called = [...source.matchAll(/node (scripts\/[\w.-]+\.mjs)/g)].map((match) => match[1]);
-    expect(called.length).toBeGreaterThanOrEqual(4);
+    expect(called.length).toBeGreaterThanOrEqual(5);
     for (const script of new Set(called)) expect(existsSync(join(repoRoot, script))).toBe(true);
     expect(new Set(called)).toEqual(
       new Set([
@@ -73,6 +98,7 @@ describe("the workflow the owner runs", () => {
         "scripts/fetch-delivery.mjs",
         "scripts/split-compilation.mjs",
         "scripts/cloud-ingest.mjs",
+        "scripts/run-on-scaleway.mjs",
       ]),
     );
   });
@@ -87,16 +113,30 @@ describe("the workflow the owner runs", () => {
     expect(source).toContain("set -euf -o pipefail");
   });
 
-  it("gives the media store's secrets only to the step that publishes", () => {
+  it("gives each secret only to the step that cannot work without it", () => {
+    const guide = readFileSync(join(repoRoot, "docs", "cloud-ingest.md"), "utf8");
     const withSecrets = steps.filter((step) => JSON.stringify(step.env ?? {}).includes("secrets."));
-    expect(withSecrets).toHaveLength(2);
+    expect(withSecrets).toHaveLength(4);
+
+    // Here: the media store, and nothing else.
     const publish = withSecrets.find((step) => (step.run ?? "").includes("cloud-ingest"));
-    expect(publish).toBeDefined();
     expect(Object.keys(publish?.env ?? {}).sort()).toEqual([...MEDIA_ENV].sort());
-    for (const name of MEDIA_ENV) {
-      expect(publish?.env?.[name]).toBe(`\${{ secrets.${name} }}`);
+
+    // There: the media store (the machine uploads) and the Scaleway account.
+    const scaleway = withSecrets.find((step) => (step.run ?? "").includes("run-on-scaleway"));
+    expect(Object.keys(scaleway?.env ?? {}).sort()).toEqual(
+      [...MEDIA_ENV, "SCW_SECRET_KEY", "SCW_ACCESS_KEY", "SCW_PROJECT_ID", "SCW_ZONE", "MODE"].sort(),
+    );
+
+    // The sweeper deletes machines; it has no business with the video store.
+    const sweep = withSecrets.find((step) => (step.run ?? "").includes("--sweep"));
+    expect(Object.keys(sweep?.env ?? {}).sort()).toEqual(["SCW_PROJECT_ID", "SCW_SECRET_KEY", "SCW_ZONE"]);
+
+    for (const name of [...MEDIA_ENV, "SCW_SECRET_KEY", "SCW_ACCESS_KEY", "SCW_PROJECT_ID", "SCW_ZONE"]) {
+      const holder = name.startsWith("SCW_") ? scaleway : publish;
+      expect(holder?.env?.[name]).toBe(`\${{ secrets.${name} }}`);
       // The owner's guide must tell him to create exactly these.
-      expect(readFileSync(join(repoRoot, "docs", "cloud-ingest.md"), "utf8")).toContain(name);
+      expect(guide).toContain(name);
     }
   });
 

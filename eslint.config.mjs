@@ -27,6 +27,8 @@ export default tseslint.config(
         URL: "readonly",
         fetch: "readonly",
         setTimeout: "readonly",
+        // The wall-clock budget of a Scaleway run (scripts/run-on-scaleway.mjs).
+        clearTimeout: "readonly",
         // Timeouts on uploads to the media store (scripts/lib/r2.mjs).
         AbortSignal: "readonly",
       },
