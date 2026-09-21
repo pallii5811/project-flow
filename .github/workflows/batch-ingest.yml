@@ -22,6 +22,14 @@ jobs:
         with:
           node-version: "22"
       
+      - name: Diagnose Scaleway
+        env:
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_ZONE: ${{ secrets.SCW_ZONE }}
+        run: node scripts/diagnose-scaleway.mjs
+
       - name: Install dependencies
         run: npm ci
 
