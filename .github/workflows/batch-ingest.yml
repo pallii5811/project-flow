@@ -85,25 +85,28 @@ jobs:
             
             # This calls the script which spawns the machine, runs auto-publish, and destroys the machine.
             # It also automatically extracts the manifest to the local workspace via COLLECTED mechanism.
-            node scripts/run-on-scaleway.mjs "$slug" --links "$url" --mode auto-publish --budget-minutes 360
-            
-            if [ -f ".split-work/$slug/$slug.cuts.json" ]; then
-              cp ".split-work/$slug/$slug.cuts.json" "content/series/$slug/cuts.json"
+            if node scripts/run-on-scaleway.mjs "$slug" --links "$url" --mode auto-publish --budget-minutes 360; then
+              echo "Successfully published $slug"
+              if [ -f ".split-work/$slug/$slug.cuts.json" ]; then
+                cp ".split-work/$slug/$slug.cuts.json" "content/series/$slug/cuts.json"
+              fi
+              
+              # Clean up the processed URL from links.txt immediately
+              grep -v -F "$url" links.txt > links.txt.tmp && mv links.txt.tmp links.txt
+              
+              if [ -n "$(git status --porcelain packages/feed-domain/src/data/generated .split-work content/series links.txt)" ]; then
+                git add packages/feed-domain/src/data/generated .split-work content/series links.txt
+                git commit -m "Ingest: $slug published by dynamic worker [skip ci]" || true
+              fi
+              
+              # Pull before push to avoid conflicts
+              git pull --rebase origin "${{ github.ref_name }}" || true
+              git push origin "${{ github.ref_name }}" || true
+              
+              processed=$((processed + 1))
+            else
+              echo "Warning: Ingest for $slug failed or was refused. Moving to next link..."
             fi
-            
-            # Clean up the processed URL from links.txt immediately
-            grep -v -F "$url" links.txt > links.txt.tmp && mv links.txt.tmp links.txt
-            
-            if [ -n "$(git status --porcelain packages/feed-domain/src/data/generated .split-work content/series links.txt)" ]; then
-              git add packages/feed-domain/src/data/generated .split-work content/series links.txt
-              git commit -m "Ingest: $slug published by dynamic worker [skip ci]" || true
-            fi
-            
-            # Pull before push to avoid conflicts
-            git pull --rebase origin "${{ github.ref_name }}" || true
-            git push origin "${{ github.ref_name }}" || true
-            
-            processed=$((processed + 1))
             
             # We process maximum 5 links per GitHub run to avoid 6-hour timeout
             if [ "$processed" -ge 5 ]; then
