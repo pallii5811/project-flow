@@ -346,9 +346,9 @@ export function createScalewayClient(config, options = {}) {
       });
     },
 
-    async attachVolume(serverId, volumeId) {
+    async attachVolume(serverId, volumeId, volumeType = "sbs_volume") {
       await send("POST", instances(`/servers/${encodeURIComponent(serverId)}/attach-volume`), {
-        body: { volume_id: volumeId },
+        body: { volume_id: volumeId, volume_type: volumeType },
       });
     },
 

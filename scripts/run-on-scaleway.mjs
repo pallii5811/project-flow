@@ -518,7 +518,13 @@ async function main() {
       }),
     );
     if (state.volumeId) {
-      await api.attachVolume(state.serverId, state.volumeId);
+      try {
+        await api.attachVolume(state.serverId, state.volumeId, plan.volumeType);
+        say(`disk attached`);
+      } catch (error) {
+        say(`extra disk could not be attached (${error.message}); using boot volume`);
+        state.volumeId = null;
+      }
     }
     await api.action(state.serverId, "poweron");
     const running = await api.waitForServer(state.serverId, {
