@@ -437,4 +437,9 @@ describe("the client, against an API that answers like Scaleway's", () => {
     expect(fake.log.filter((entry) => (entry.raw ?? "").includes(SECRET))).toEqual([]);
     expect(fake.log.filter((entry) => entry.token === SECRET).length).toBeGreaterThan(10);
   });
+
+  it("lists accessible projects via listProjects", async () => {
+    const projects = await api.listProjects();
+    expect(projects).toEqual([{ id: PROJECT, name: "cliffies", organization_id: "org-1" }]);
+  });
 });

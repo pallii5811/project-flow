@@ -107,7 +107,10 @@ export function startFakeScaleway({ secretKey, projectId, zone = "fr-par-1", pol
 
     // Account / Projects
     if (method === "GET" && path === "/account/v3/projects") {
-      return answer(response, 200, { projects: [{ id: projectId, name: "cliffies" }] }, entry);
+      return answer(response, 200, { projects: [{ id: projectId, name: "cliffies", organization_id: "org-1" }] }, entry);
+    }
+    if (method === "GET" && path.startsWith("/account/v3/projects/")) {
+      return answer(response, 200, { id: projectId, name: "cliffies", organization_id: "org-1" }, entry);
     }
 
     const prefix = `/instance/v1/zones/${zone}`;

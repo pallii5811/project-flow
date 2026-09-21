@@ -205,8 +205,31 @@ export function createScalewayClient(config, options = {}) {
     publicIpOf,
 
     async listProjects() {
-      const answer = await send("GET", `${baseUrl}/account/v3/projects`);
-      return answer?.projects ?? [];
+      // 1. If config.projectId happens to be the organization ID:
+      try {
+        const answer = await send("GET", `${baseUrl}/account/v3/projects`, {
+          query: { organization_id: config.projectId },
+        });
+        if (answer?.projects?.length) return answer.projects;
+      } catch {}
+
+      // 2. If config.projectId is already a project ID, fetch that project:
+      try {
+        const proj = await send("GET", `${baseUrl}/account/v3/projects/${encodeURIComponent(config.projectId)}`);
+        if (proj?.id) {
+          if (proj.organization_id) {
+            try {
+              const answer = await send("GET", `${baseUrl}/account/v3/projects`, {
+                query: { organization_id: proj.organization_id },
+              });
+              if (answer?.projects?.length) return answer.projects;
+            } catch {}
+          }
+          return [proj];
+        }
+      } catch {}
+
+      return [];
     },
 
     /**
