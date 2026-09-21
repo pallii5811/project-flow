@@ -11,6 +11,8 @@ jobs:
     name: Orchestrate YouTube Batch
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,11 +24,6 @@ jobs:
       
       - name: Install dependencies
         run: npm ci
-
-      - name: Install yt-dlp locally for slug extraction
-        run: |
-          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp -o /usr/local/bin/yt-dlp
-          sudo chmod a+rx /usr/local/bin/yt-dlp
 
       - name: Process links one by one
         env:
@@ -64,15 +61,11 @@ jobs:
             echo "----------------------------------------"
             echo "Processing $url"
             
-            video_id=$(yt-dlp --print "%(id)s" "$url" | head -n 1 || true)
-            video_title=$(yt-dlp --print "%(title)s" "$url" | head -n 1 || true)
-            if [ -z "$video_id" ]; then
-              echo "Failed to get video ID for $url"
+            slug=$(node scripts/init-series.mjs "$url")
+            if [ -z "$slug" ]; then
+              echo "Failed to extract slug for $url"
               continue
             fi
-            
-            slug="yt-$video_id"
-            node scripts/init-series.mjs "$slug" "$video_title"
             
             git add "content/series/$slug/series.json"
             git commit -m "chore: setup series $slug [skip ci]" || true
