@@ -166,7 +166,8 @@ export function createScalewayClient(config, options = {}) {
       }
       if (response.ok) return parsed ?? {};
       const type = parsed?.type ?? parsed?.code ?? null;
-      const said = parsed?.message ?? (text ? text.slice(0, 300) : "");
+      const details = parsed?.fields ? ` (fields: ${JSON.stringify(parsed.fields)})` : (parsed?.details ? ` (details: ${JSON.stringify(parsed.details)})` : "");
+      const said = (parsed?.message ?? (text ? text.slice(0, 300) : "")) + details;
       const transient = TRANSIENT_STATUS.has(response.status);
       const hint =
         response.status === 401 || response.status === 403
@@ -227,6 +228,26 @@ export function createScalewayClient(config, options = {}) {
     },
 
     async createVolume({ name, sizeGb, volumeType, tags }) {
+      if (volumeType?.startsWith("sbs")) {
+        try {
+          const answer = await send("POST", `${baseUrl}/block/v1/zones/${zone}/volumes`, {
+            body: {
+              name,
+              project_id: config.projectId,
+              perf_iops: 5000,
+              from_empty: {
+                size: Math.round(sizeGb) * 1_000_000_000,
+              },
+              tags,
+            },
+          });
+          if (answer?.id || answer?.volume?.id) {
+            return answer?.volume ?? answer;
+          }
+        } catch {
+          // fallback to instance API
+        }
+      }
       const answer = await send("POST", instances("/volumes"), {
         body: {
           name,

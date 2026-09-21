@@ -454,14 +454,19 @@ async function main() {
     const image = await api.resolveImage(plan.image, { commercialType: plan.type });
     say(`image ${plan.image} is ${image}`);
 
-    const volume = await api.createVolume({
-      name: plan.volumeName,
-      sizeGb: plan.volumeGb,
-      volumeType: plan.volumeType,
-      tags: plan.tags,
-    });
-    state.volumeId = volume?.id ?? null;
-    say(`disk ${plan.volumeGb} GB made`);
+    try {
+      const volume = await api.createVolume({
+        name: plan.volumeName,
+        sizeGb: plan.volumeGb,
+        volumeType: plan.volumeType,
+        tags: plan.tags,
+      });
+      state.volumeId = volume?.id ?? null;
+      say(`disk ${plan.volumeGb} GB made`);
+    } catch (error) {
+      say(`extra disk could not be created (${error.message}); using boot volume`);
+      state.volumeId = null;
+    }
 
     const until = Math.round((Date.now() + plan.budgetMinutes * 60_000) / 1000);
     const server = await api.createServer({
@@ -484,7 +489,9 @@ async function main() {
         ...(isArm ? { ffmpegUrl: FFMPEG_ARM64_URL, ffmpegSha256: FFMPEG_ARM64_SHA256 } : {}),
       }),
     );
-    await api.attachVolume(state.serverId, state.volumeId);
+    if (state.volumeId) {
+      await api.attachVolume(state.serverId, state.volumeId);
+    }
     await api.action(state.serverId, "poweron");
     const running = await api.waitForServer(state.serverId, {
       states: ["running"],
