@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'links.txt'
+  workflow_dispatch:
 
 jobs:
   orchestrate:
@@ -71,37 +72,7 @@ jobs:
             fi
             
             slug="yt-$video_id"
-            video_title_clean=$(echo "$video_title" | sed 's/"/\\"/g')
-            
-            mkdir -p "content/series/$slug"
-            cat > "content/series/$slug/series.json" <<EOF
-{
-  "schemaVersion": 1,
-  "seriesId": "series_$slug",
-  "seriesSlug": "$slug",
-  "title": "$video_title_clean",
-  "status": "published",
-  "defaultLocale": "en",
-  "producerId": "prod_standin_inhouse",
-  "producerOfRecord": "Automated YouTube Ingest",
-  "socialClipsAllowed": false,
-  "episodeDurationMs": { "min": 15000, "max": 240000 },
-  "genres": [],
-  "tropes": [],
-  "rights": {
-    "territories": ["WORLD"],
-    "languages": ["en"],
-    "windowStart": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)",
-    "windowEnd": null
-  },
-  "splitAllowed": true,
-  "splitPermission": {
-    "grantedOn": "$(date -I)",
-    "source": "Automated end-to-end pipeline confirmation"
-  },
-  "episodes": []
-}
-EOF
+            node scripts/init-series.mjs "$slug" "$video_title"
             
             git add "content/series/$slug/series.json"
             git commit -m "chore: setup series $slug [skip ci]" || true
