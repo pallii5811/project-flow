@@ -1,0 +1,29 @@
+name: Automated Media Download
+
+on:
+  push:
+    paths:
+      - 'links.txt'
+
+jobs:
+  download:
+    name: Download Media on Scaleway
+    runs-on: ubuntu-latest
+    steps:
+      - name: Execute remote download via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          MEDIA_BASE_URL: ${{ secrets.MEDIA_BASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        with:
+          host: ${{ secrets.SCALEWAY_IP }}
+          username: ${{ secrets.SCALEWAY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: MEDIA_BASE_URL,R2_ACCOUNT_ID,R2_ACCESS_KEY_ID,R2_SECRET_ACCESS_KEY,R2_BUCKET
+          script: |
+            cd ~/project-flow || cd project-flow || exit 1
+            git pull
+            bash scripts/download.sh
