@@ -294,7 +294,7 @@ async function main() {
   const dryRun = has("--dry-run");
   const sweeping = has("--sweep");
   const mode = flag("--mode", "publish");
-  if (!["publish", "propose-cuts"].includes(mode)) die("--mode must be publish or propose-cuts");
+  if (!["publish", "propose-cuts", "auto-publish"].includes(mode)) die("--mode must be publish, propose-cuts, or auto-publish");
 
   const config = scalewayConfig(process.env);
   if (!config.ok && !(dryRun && !sweeping)) {

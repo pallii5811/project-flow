@@ -1,0 +1,147 @@
+name: Batch YouTube Ingest (Dynamic)
+
+on:
+  push:
+    paths:
+      - 'links.txt'
+
+jobs:
+  orchestrate:
+    name: Orchestrate YouTube Batch
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install yt-dlp locally for slug extraction
+        run: |
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+
+      - name: Process links one by one
+        env:
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_ZONE: ${{ secrets.SCW_ZONE }}
+          MEDIA_BASE_URL: ${{ secrets.MEDIA_BASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -e
+          
+          # Read valid URLs
+          urls=()
+          while IFS= read -r line || [ -n "$line" ]; do
+            line_trimmed=$(echo "$line" | xargs)
+            if [ -n "$line_trimmed" ] && [[ "$line_trimmed" != "#"* ]]; then
+              urls+=("$line_trimmed")
+            fi
+          done < links.txt
+
+          if [ ${#urls[@]} -eq 0 ]; then
+            echo "No URLs to process."
+            exit 0
+          fi
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          processed=0
+          for url in "${urls[@]}"; do
+            echo "----------------------------------------"
+            echo "Processing $url"
+            
+            video_id=$(yt-dlp --print "%(id)s" "$url" | head -n 1 || true)
+            video_title=$(yt-dlp --print "%(title)s" "$url" | head -n 1 || true)
+            if [ -z "$video_id" ]; then
+              echo "Failed to get video ID for $url"
+              continue
+            fi
+            
+            slug="yt-$video_id"
+            video_title_clean=$(echo "$video_title" | sed 's/"/\\"/g')
+            
+            mkdir -p "content/series/$slug"
+            cat > "content/series/$slug/series.json" <<EOF
+{
+  "schemaVersion": 1,
+  "seriesId": "series_$slug",
+  "seriesSlug": "$slug",
+  "title": "$video_title_clean",
+  "status": "published",
+  "defaultLocale": "en",
+  "producerId": "prod_standin_inhouse",
+  "producerOfRecord": "Automated YouTube Ingest",
+  "socialClipsAllowed": false,
+  "episodeDurationMs": { "min": 15000, "max": 240000 },
+  "genres": [],
+  "tropes": [],
+  "rights": {
+    "territories": ["WORLD"],
+    "languages": ["en"],
+    "windowStart": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)",
+    "windowEnd": null
+  },
+  "splitAllowed": true,
+  "splitPermission": {
+    "grantedOn": "$(date -I)",
+    "source": "Automated end-to-end pipeline confirmation"
+  },
+  "episodes": []
+}
+EOF
+            
+            git add "content/series/$slug/series.json"
+            git commit -m "chore: setup series $slug [skip ci]" || true
+            
+            echo "Spawning dynamic Scaleway machine for $slug..."
+            
+            # This calls Claude's script which spawns the machine, runs auto-publish, and destroys the machine.
+            # It also automatically extracts the manifest to the local workspace via COLLECTED mechanism.
+            node scripts/run-on-scaleway.mjs "$slug" --links "$url" --mode auto-publish --budget-minutes 360
+            
+            if [ -f ".split-work/$slug/$slug.cuts.json" ]; then
+              cp ".split-work/$slug/$slug.cuts.json" "content/series/$slug/cuts.json"
+            fi
+            
+            if [ -n "$(git status --porcelain packages/feed-domain/src/data/generated .split-work content/series)" ]; then
+              git add packages/feed-domain/src/data/generated .split-work content/series
+              git commit -m "Ingest: $slug published by dynamic worker [skip ci]" || true
+            fi
+            
+            # Pull before push to avoid conflicts if triggered multiple times
+            git pull --rebase origin HEAD || true
+            git push origin HEAD || true
+            
+            processed=$((processed + 1))
+            
+            # We process maximum 5 links per GitHub run to avoid 6-hour timeout
+            if [ "$processed" -ge 5 ]; then
+              echo "Reached limit of 5 videos per run to avoid 6-hour limit."
+              break
+            fi
+          done
+          
+          # Clean up the URLs we just processed from links.txt
+          tail -n +$((processed + 1 + $(grep -c "^#" links.txt || echo 0))) links.txt > links.txt.tmp || true
+          cat links.txt.tmp > links.txt
+          git add links.txt
+          git commit -m "chore: clean processed links [skip ci]" || true
+          git push origin HEAD || true
+          
+          if [ ${#urls[@]} -gt 5 ]; then
+             echo "Still more URLs left. Committing links.txt above will NOT trigger a new run because of [skip ci]."
+             echo "To continue, manually trigger or remove [skip ci]."
+          fi

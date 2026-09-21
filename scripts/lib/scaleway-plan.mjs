@@ -14,7 +14,7 @@
  *      links and the secrets travel as environment lines on the run's stdin;
  *      the command sent over ssh is one fixed path with no arguments.
  */
-import { APT_PACKAGES, FFMPEG_SHA256, FFMPEG_URL, NODE_SNAP_CHANNEL } from "./pinned-tools.mjs";
+import { APT_PACKAGES, FFMPEG_SHA256, FFMPEG_URL, NODE_SNAP_CHANNEL, YT_DLP_URL, YT_DLP_SHA256 } from "./pinned-tools.mjs";
 
 /** The tag every machine and every volume of this project carries. The sweeper looks for it. */
 export const RUN_TAG = "cliffies-ingest";
@@ -293,7 +293,7 @@ export const COLLECTED = Object.freeze([
  * it. Neither alone is enough; both together mean a crash costs minutes, not
  * a month.
  */
-export function cloudInit({ publicKey, shutdownMinutes, ffmpegUrl = FFMPEG_URL, ffmpegSha256 = FFMPEG_SHA256 }) {
+export function cloudInit({ publicKey, shutdownMinutes, ffmpegUrl = FFMPEG_URL, ffmpegSha256 = FFMPEG_SHA256, ytDlpUrl = YT_DLP_URL, ytDlpSha256 = YT_DLP_SHA256 }) {
   if (!/^ssh-(ed25519|rsa) [A-Za-z0-9+/=]+/.test(String(publicKey ?? "").trim())) {
     throw new Error("cloudInit: a public ssh key is required (and only the public half)");
   }
@@ -358,6 +358,11 @@ export function cloudInit({ publicKey, shutdownMinutes, ffmpegUrl = FFMPEG_URL, 
     "rm -f ffmpeg.tar.xz",
     "/opt/ffmpeg/bin/ffmpeg -version > /dev/null",
     "",
+    "# yt-dlp, pinned to its sha256",
+    `curl -fsSL "${ytDlpUrl}" -o /usr/local/bin/yt-dlp`,
+    `echo "${ytDlpSha256}  /usr/local/bin/yt-dlp" | sha256sum -c -`,
+    `chmod +x /usr/local/bin/yt-dlp`,
+    "",
     "# Ubuntu carries Node 18; this repository needs 20 or later. The snap is",
     "# signed by Canonical, which piping a third party's installer into a shell",
     "# is not.",
@@ -388,8 +393,8 @@ export function cloudInit({ publicKey, shutdownMinutes, ffmpegUrl = FFMPEG_URL, 
     '  ""|*[!a-z0-9-]*) echo "cliffies-run: that is not a series slug" >&2; exit 64 ;;',
     "esac",
     'case "$CLIFFIES_MODE" in',
-    "  publish|propose-cuts) ;;",
-    '  *) echo "cliffies-run: mode must be publish or propose-cuts" >&2; exit 64 ;;',
+    "  publish|propose-cuts|auto-publish) ;;",
+    '  *) echo "cliffies-run: mode must be publish, propose-cuts, or auto-publish" >&2; exit 64 ;;',
     "esac",
     'case "$CLIFFIES_BUDGET_MINUTES" in',
     '  ""|*[!0-9]*) echo "cliffies-run: the budget must be a number of minutes" >&2; exit 64 ;;',
@@ -398,6 +403,24 @@ export function cloudInit({ publicKey, shutdownMinutes, ffmpegUrl = FFMPEG_URL, 
     "cd " + REMOTE.repo,
     'echo "cliffies-run: node $(node --version) on $(nproc) cores"',
     "node scripts/check-ffmpeg.mjs",
+    'if [ "$CLIFFIES_MODE" = "auto-publish" ]; then',
+    `  echo "cliffies-run: downloading YouTube video with yt-dlp"`,
+    `  yt-dlp --format "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --merge-output-format mp4 -o "${REMOTE.delivery}/delivery.mp4" "$CLIFFIES_LINKS"`,
+    `  echo "cliffies-run: proposing cuts"`,
+    `  node scripts/split-compilation.mjs propose "$CLIFFIES_SLUG" --input "${REMOTE.delivery}/delivery.mp4" --out "${REMOTE.out}/$CLIFFIES_SLUG"`,
+    `  echo "cliffies-run: auto-confirming cuts"`,
+    `  node -e "const fs=require('fs'); const path='${REMOTE.out}/$CLIFFIES_SLUG/$CLIFFIES_SLUG.cuts.json'; const data=JSON.parse(fs.readFileSync(path)); data.confirmed=true; fs.writeFileSync(path, JSON.stringify(data, null, 2)); fs.mkdirSync('${REMOTE.repo}/content/series/$CLIFFIES_SLUG', {recursive:true}); fs.copyFileSync(path, '${REMOTE.repo}/content/series/$CLIFFIES_SLUG/cuts.json');"`,
+    `  echo "cliffies-run: splitting compilation"`,
+    `  node scripts/split-compilation.mjs split "$CLIFFIES_SLUG" --input "${REMOTE.delivery}/delivery.mp4"`,
+    `  set +e`,
+    `  echo "cliffies-run: starting cloud ingest"`,
+    `  node scripts/cloud-ingest.mjs "$CLIFFIES_SLUG" --source "${REMOTE.delivery}/delivery.mp4" --budget-minutes "$CLIFFIES_BUDGET_MINUTES"`,
+    `  code=$?`,
+    `  set -e`,
+    `  df -h ${REMOTE.work} | tail -1`,
+    `  echo "cliffies-run: ingest finished with $code"`,
+    `  exit $code`,
+    `fi`,
     `node scripts/fetch-delivery.mjs --out ${REMOTE.delivery} $CLIFFIES_LINKS`,
     'if [ "$CLIFFIES_MODE" = "propose-cuts" ]; then',
     `  node scripts/split-compilation.mjs propose "$CLIFFIES_SLUG" --input ${REMOTE.delivery} --out "${REMOTE.out}/$CLIFFIES_SLUG"`,

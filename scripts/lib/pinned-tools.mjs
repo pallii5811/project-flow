@@ -19,6 +19,11 @@ export const FFMPEG_URL =
 /** sha256 of that file, as its author published it. */
 export const FFMPEG_SHA256 = "26d2ecd0cefba99f9d1ea92252a3a4f743a58df4c1c3cf9f8bbaaa40b1fca5b0";
 
+/** The pinned yt-dlp build (linux standalone executable). */
+export const YT_DLP_URL = "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp";
+/** sha256 of that file, as calculated on 2026-09-21. */
+export const YT_DLP_SHA256 = "1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6";
+
 /**
  * Node on a fresh Ubuntu machine. Ubuntu 24.04 carries Node 18, which this
  * repository does not run on (package.json asks for 20 or later), so the
