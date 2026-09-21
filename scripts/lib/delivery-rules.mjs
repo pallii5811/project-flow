@@ -140,6 +140,22 @@ export function checkCaptionLicence(language, rights) {
 }
 
 /**
+ * Does this episode declare captions, or does the delivery allow running without external caption files?
+ * Vertical short dramas on video platforms often have burned-in hardcoded subtitles directly on the picture.
+ */
+export function checkCaptionsDeclared(episode, delivery = {}) {
+  const declared = Array.isArray(episode?.captions) ? episode.captions : [];
+  if (declared.length === 0) {
+    if (delivery?.allowNoCaptions !== true && episode?.allowNoCaptions !== true) {
+      return [
+        issue("no_captions", "no caption file declared: most of the feed is watched muted"),
+      ];
+    }
+  }
+  return [];
+}
+
+/**
  * The options the gate judges an episode with, as the delivery sets them.
  * Recorded in the packaged episode, so a corrected delivery re-runs the gate.
  */

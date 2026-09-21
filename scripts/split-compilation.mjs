@@ -421,6 +421,9 @@ async function propose() {
 
   const episodeCount = choice.cuts.length + 1;
   if (episodes.length === 0) {
+    if (delivery.allowNoCaptions === undefined) {
+      delivery.allowNoCaptions = true;
+    }
     delivery.episodes = Array.from({ length: episodeCount }, (_, i) => ({
       episodeNumber: i + 1,
       master: `masters/episode-${i + 1}.mp4`,

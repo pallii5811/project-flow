@@ -34,6 +34,7 @@ import {
 } from "../scripts/lib/vtt.mjs";
 import {
   checkCaptionLicence,
+  checkCaptionsDeclared,
   checkEpisodeNumbers,
   checkEpisodeSlugs,
   checkRights,
@@ -640,5 +641,24 @@ describe("subtitles", () => {
     expect(codes(captionNotes(parsed, 90_000))).toEqual(["quiet_tail"]);
     // A two-second sting after the last line on a short episode is not worth a word.
     expect(captionNotes(parseVttCues(vtt), 10_000)).toEqual([]);
+  });
+
+  it("checks whether captions are declared or allowNoCaptions is set", () => {
+    // Missing captions without allowNoCaptions fails with no_captions
+    expect(codes(checkCaptionsDeclared({ episodeNumber: 1 }))).toEqual(["no_captions"]);
+    expect(codes(checkCaptionsDeclared({ episodeNumber: 1, captions: [] }))).toEqual(["no_captions"]);
+    expect(codes(checkCaptionsDeclared({ episodeNumber: 1 }, { allowNoCaptions: false }))).toEqual(["no_captions"]);
+
+    // allowNoCaptions on delivery or episode passes
+    expect(checkCaptionsDeclared({ episodeNumber: 1 }, { allowNoCaptions: true })).toEqual([]);
+    expect(checkCaptionsDeclared({ episodeNumber: 1, allowNoCaptions: true }, {})).toEqual([]);
+
+    // Declared captions pass
+    expect(
+      checkCaptionsDeclared({
+        episodeNumber: 1,
+        captions: [{ language: "en", file: "captions/ep1.vtt" }],
+      }),
+    ).toEqual([]);
   });
 });

@@ -64,6 +64,7 @@ async function main() {
       producerOfRecord: "Automated YouTube Ingest",
       socialClipsAllowed: false,
       allowBelow1080p: true,
+      allowNoCaptions: true,
       episodeDurationMs: { min: 45000, max: 180000 },
       genres: [],
       tropes: [],

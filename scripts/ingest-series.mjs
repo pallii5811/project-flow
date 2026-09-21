@@ -84,6 +84,7 @@ import {
 import { checkDuplicateSource, formatIssues } from "./lib/media-gate.mjs";
 import {
   checkCaptionLicence,
+  checkCaptionsDeclared,
   checkEpisodeNumbers,
   checkEpisodeSlugs,
   checkRights,
@@ -1075,12 +1076,7 @@ function buildCaptions({ dir, delivery, episode, episodeSlug, label, durationMs,
   const issues = [];
   const notes = [];
   const declared = Array.isArray(episode.captions) ? episode.captions : [];
-  if (declared.length === 0) {
-    issues.push({
-      code: "no_captions",
-      message: "no caption file declared: most of the feed is watched muted",
-    });
-  }
+  issues.push(...checkCaptionsDeclared(episode, delivery));
   for (const track of declared) {
     const language = track.language;
     const sourcePath = resolve(dir, track.file ?? "");
