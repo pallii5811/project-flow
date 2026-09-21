@@ -42,7 +42,7 @@ export const QUALITY_RULES = {
   openingSeconds: 5,
   /** Black or silence at least this long inside the opening fails. */
   blackOpeningMaxSeconds: 0.5,
-  silenceOpeningMaxSeconds: 1.5,
+  silenceOpeningMaxSeconds: 2.5,
   /** A still picture this long inside the opening: the hook does not move. */
   freezeOpeningMaxSeconds: 1.5,
   /**

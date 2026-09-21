@@ -412,6 +412,24 @@ describe("black, frozen and silent", () => {
         ),
       ),
     ).toEqual(["silent_opening"]);
+    // A natural dialogue pause of 1.8s inside the first 5s (e.g. at 3.19s) is accepted
+    expect(
+      codes(
+        checkSilence(
+          { black: [], freeze: [], silence: [{ start: 3.19, end: 4.99, duration: 1.8 }] },
+          90_000,
+        ),
+      ),
+    ).toEqual([]);
+    // Silence >= 2.5s in the first 5s is refused
+    expect(
+      codes(
+        checkSilence(
+          { black: [], freeze: [], silence: [{ start: 0, end: 3, duration: 3 }] },
+          90_000,
+        ),
+      ),
+    ).toEqual(["silent_opening"]);
     expect(
       codes(
         checkSilence(

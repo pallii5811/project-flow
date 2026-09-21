@@ -4,6 +4,16 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-21 — Quality gate: silenceOpeningMaxSeconds updated to 2.5s for real-world drama dialogue
+
+**Decision:** `QUALITY_RULES.silenceOpeningMaxSeconds` is updated from 1.5s to 2.5s. In the 5-second opening window of an episode, silence is refused only when it reaches or exceeds 2.5 seconds (half the opening). Leading dead air (silence or black before the drama begins) continues to be dropped by `startFrame` in the compilation splitter.
+
+**Why:** The previous value of 1.5s was set before any real drama delivery had run. In the first real short drama delivery (`yt-ei28raqmgko`), episode 1 opened with 3.19 seconds of speech followed by a 1.80-second natural dialogue pause between two spoken lines before second 5. The gate treated this 1.8-second dramatic pause as `silent_opening`. In real-world drama, human speech includes 1.5–2.0 second dramatic pauses between lines. A threshold of 2.5 seconds permits natural acting pauses while still strictly refusing any opening that is mostly silent (2.5s+ of dead air in the first 5s).
+
+**Consequences:** `test/content-pipeline.test.ts` updated to verify that a 1.8s dialogue pause inside the opening passes, while a 3.0s silence is refused as `silent_opening`. `QUALITY_RULES.silenceOpeningMaxSeconds` updated in `scripts/lib/media-gate.mjs`.
+
+---
+
 ## 2026-09-20 — Batch 7: the encoding moves to a machine made for one series and deleted with it
 
 **Decision:** The workflow gains one input, `runner`, with two values that run the **same**
