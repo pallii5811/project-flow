@@ -124,7 +124,7 @@ export function createScalewayClient(config, options = {}) {
 
   const instances = (path) => `${baseUrl}/instance/v1/zones/${encodeURIComponent(zone)}${path}`;
 
-  async function send(method, url, { body = null, accept = "json", query = null } = {}) {
+  async function send(method, url, { body = null, accept = "json", query = null, contentType = "application/json" } = {}) {
     const target = new URL(url);
     for (const [name, value] of Object.entries(query ?? {})) {
       if (value !== null && value !== undefined) target.searchParams.set(name, String(value));
@@ -146,10 +146,10 @@ export function createScalewayClient(config, options = {}) {
             // The one place the secret is used. It is a header, never a query
             // parameter: a URL reaches logs, proxies and error messages.
             "X-Auth-Token": config.secretKey,
-            "content-type": "application/json",
+            "content-type": contentType,
             accept: accept === "json" ? "application/json" : "*/*",
           },
-          body: body === null ? undefined : JSON.stringify(body),
+          body: body === null ? undefined : (contentType === "application/json" ? JSON.stringify(body) : String(body)),
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (error) {
@@ -341,7 +341,8 @@ export function createScalewayClient(config, options = {}) {
     /** The cloud-init. Sent as its own call, so it never travels in a URL or a tag. */
     async setCloudInit(serverId, text) {
       await send("PATCH", instances(`/servers/${encodeURIComponent(serverId)}/user_data/cloud-init`), {
-        body: { content: text },
+        body: text,
+        contentType: "text/plain",
       });
     },
 

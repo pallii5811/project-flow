@@ -199,7 +199,7 @@ export function startFakeScaleway({ secretKey, projectId, zone = "fr-par-1", pol
       if (method === "GET" && parts.length === 2) return answer(response, 200, { server: settle(server) }, entry);
 
       if (method === "PATCH" && parts[2] === "user_data") {
-        server.cloudInit = body?.content ?? "";
+        server.cloudInit = typeof body === "string" ? body : (body?.content ?? entry.raw ?? "");
         cloudInits.push({ server: server.id, name: server.name, content: server.cloudInit });
         return answer(response, 204, null, entry);
       }
