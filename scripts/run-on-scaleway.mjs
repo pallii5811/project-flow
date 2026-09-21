@@ -451,6 +451,22 @@ async function main() {
   }, plan.budgetMinutes * 60_000);
 
   try {
+    let effectiveProjectId = config.config.projectId;
+    try {
+      const projects = await api.listProjects();
+      if (projects.length > 0) {
+        say(`accessible Scaleway project(s): ${projects.map((p) => `"${p.name}" (${p.id})`).join(", ")}`);
+        const matching = projects.find((p) => p.id === effectiveProjectId);
+        if (!matching) {
+          const byName = projects.find((p) => p.name.toLowerCase() === "cliffies") ?? projects[0];
+          say(`note: SCW_PROJECT_ID was ${effectiveProjectId}; switching to "${byName.name}" (${byName.id})`);
+          effectiveProjectId = byName.id;
+        }
+      }
+    } catch (e) {
+      say(`could not list projects: ${e.message}`);
+    }
+
     const image = await api.resolveImage(plan.image, { commercialType: plan.type });
     say(`image ${plan.image} is ${image}`);
 
@@ -460,6 +476,7 @@ async function main() {
         sizeGb: plan.volumeGb,
         volumeType: plan.volumeType,
         tags: plan.tags,
+        projectId: effectiveProjectId,
       });
       state.volumeId = volume?.id ?? null;
       say(`disk ${plan.volumeGb} GB made`);
@@ -474,6 +491,7 @@ async function main() {
       commercialType: plan.type,
       image,
       tags: [...plan.tags, `until:${until}`],
+      projectId: effectiveProjectId,
     });
     state.serverId = server?.id ?? null;
     state.startedAt = Date.now();

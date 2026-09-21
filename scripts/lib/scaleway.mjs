@@ -204,6 +204,11 @@ export function createScalewayClient(config, options = {}) {
     redact: clean,
     publicIpOf,
 
+    async listProjects() {
+      const answer = await send("GET", `${baseUrl}/account/v3/projects`);
+      return answer?.projects ?? [];
+    },
+
     /**
      * An image label ("ubuntu_noble") is not what create-server takes: it
      * takes a UUID. The marketplace answers which image that label is in this
@@ -227,13 +232,14 @@ export function createScalewayClient(config, options = {}) {
       return fit.id;
     },
 
-    async createVolume({ name, sizeGb, volumeType, tags }) {
+    async createVolume({ name, sizeGb, volumeType, tags, projectId = null }) {
+      const targetProject = projectId ?? config.projectId;
       if (volumeType?.startsWith("sbs")) {
         try {
           const answer = await send("POST", `${baseUrl}/block/v1/zones/${zone}/volumes`, {
             body: {
               name,
-              project_id: config.projectId,
+              project_id: targetProject,
               perf_iops: 5000,
               from_empty: {
                 size: Math.round(sizeGb) * 1_000_000_000,
@@ -251,7 +257,7 @@ export function createScalewayClient(config, options = {}) {
       const answer = await send("POST", instances("/volumes"), {
         body: {
           name,
-          project: config.projectId,
+          project: targetProject,
           volume_type: volumeType,
           size: Math.round(sizeGb) * 1_000_000_000,
           tags,
@@ -273,11 +279,12 @@ export function createScalewayClient(config, options = {}) {
       await maybe(send("DELETE", instances(`/volumes/${encodeURIComponent(id)}`)));
     },
 
-    async createServer({ name, commercialType, image, tags }) {
+    async createServer({ name, commercialType, image, tags, projectId = null }) {
+      const targetProject = projectId ?? config.projectId;
       const answer = await send("POST", instances("/servers"), {
         body: {
           name,
-          project: config.projectId,
+          project: targetProject,
           commercial_type: commercialType,
           image,
           tags,
