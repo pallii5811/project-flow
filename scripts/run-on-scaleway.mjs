@@ -40,6 +40,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { isSlug } from "./lib/delivery-rules.mjs";
 import { mediaConfig, MEDIA_ENV } from "./lib/media-publish.mjs";
+import { FFMPEG_ARM64_URL, FFMPEG_ARM64_SHA256 } from "./lib/pinned-tools.mjs";
 import {
   billedMinutes,
   COLLECTED,
@@ -474,7 +475,15 @@ async function main() {
     if (!state.serverId) throw new ScalewayError("Scaleway created no machine and said nothing about why");
     say(`machine ${plan.name} made`);
 
-    await api.setCloudInit(state.serverId, cloudInit({ publicKey: key.publicKey, shutdownMinutes: plan.budgetMinutes }));
+    const isArm = plan.type.includes("-A");
+    await api.setCloudInit(
+      state.serverId,
+      cloudInit({
+        publicKey: key.publicKey,
+        shutdownMinutes: plan.budgetMinutes,
+        ...(isArm ? { ffmpegUrl: FFMPEG_ARM64_URL, ffmpegSha256: FFMPEG_ARM64_SHA256 } : {}),
+      }),
+    );
     await api.attachVolume(state.serverId, state.volumeId);
     await api.action(state.serverId, "poweron");
     const running = await api.waitForServer(state.serverId, {

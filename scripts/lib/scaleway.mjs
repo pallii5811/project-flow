@@ -211,7 +211,7 @@ export function createScalewayClient(config, options = {}) {
     async resolveImage(label, { commercialType }) {
       if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(label)) return label;
       const answer = await send("GET", `${baseUrl}/marketplace/v2/local-images`, {
-        query: { image_label: label, zone, type: "instance_local" },
+        query: { image_label: label, zone },
       });
       const images = answer?.local_images ?? [];
       const fit =

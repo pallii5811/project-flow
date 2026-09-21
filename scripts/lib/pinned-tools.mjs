@@ -19,6 +19,12 @@ export const FFMPEG_URL =
 /** sha256 of that file, as its author published it. */
 export const FFMPEG_SHA256 = "26d2ecd0cefba99f9d1ea92252a3a4f743a58df4c1c3cf9f8bbaaa40b1fca5b0";
 
+/** The pinned ffmpeg build for ARM64 (linuxarm64, GPL, static). */
+export const FFMPEG_ARM64_URL =
+  "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-02-28-12-59/ffmpeg-n8.0.1-66-g27b8d1a017-linuxarm64-gpl-8.0.tar.xz";
+/** sha256 of that file, as verified on 2026-09-21. */
+export const FFMPEG_ARM64_SHA256 = "d72cc324cb65dd92a9ffe699cc95ccbacfef4def8d3ad9fe2b5164a6a71b9595";
+
 /** The pinned yt-dlp build (linux standalone executable). */
 export const YT_DLP_URL = "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp";
 /** sha256 of that file, as calculated on 2026-09-21. */

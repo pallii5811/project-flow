@@ -178,6 +178,7 @@ describe("the cloud-init the machine boots with", () => {
       "apt-get",
       "awk",
       "bash",
+      "chmod",
       "chown",
       "curl",
       "date",
@@ -197,6 +198,7 @@ describe("the cloud-init the machine boots with", () => {
       "tar",
       "touch",
       "tr",
+      "yt-dlp",
     ]);
     /** Shell keywords and builtins: nothing to install for these. */
     const shell = new Set([
@@ -280,7 +282,7 @@ describe("the cloud-init the machine boots with", () => {
     // A slug that is not a slug, a mode that is not a mode, a budget that is
     // not a number: refused there too, not only here.
     expect(run).toContain('""|*[!a-z0-9-]*)');
-    expect(run).toContain("publish|propose-cuts) ;;");
+    expect(run).toContain("publish|propose-cuts|auto-publish) ;;");
     expect(run).toContain("node scripts/check-ffmpeg.mjs");
     expect(run).toContain("node scripts/cloud-ingest.mjs");
   });
