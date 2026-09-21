@@ -63,7 +63,8 @@ async function main() {
       producerId: "prod_standin_inhouse",
       producerOfRecord: "Automated YouTube Ingest",
       socialClipsAllowed: false,
-      episodeDurationMs: { min: 15000, max: 240000 },
+      allowBelow1080p: true,
+      episodeDurationMs: { min: 45000, max: 180000 },
       genres: [],
       tropes: [],
       rights: {

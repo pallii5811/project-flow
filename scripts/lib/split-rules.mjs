@@ -350,42 +350,48 @@ export function describeEvidence(evidence) {
  */
 export function chooseCuts(input, rules = SPLIT_RULES) {
   const { fps, durationSeconds, episodes, minSeconds, maxSeconds } = input;
-  const lastFrame = Math.round(durationSeconds * fps);
+  const startFrame = input.startFrame ?? 0;
+  const lastFrame = input.endFrame ?? Math.round(durationSeconds * fps);
+  const totalFrames = lastFrame - startFrame;
   const minFrames = Math.ceil(minSeconds * fps);
   const maxFrames = Math.floor(maxSeconds * fps);
   if (episodes !== null && episodes !== undefined) {
     if (!Number.isInteger(episodes) || episodes < 1) return { ok: false, reason: "the episode count is not a whole number" };
-    if (episodes * minFrames > lastFrame) {
+    if (episodes * minFrames > totalFrames) {
       return {
         ok: false,
-        reason: `${episodes} episodes of at least ${minSeconds} s need ${(episodes * minSeconds).toFixed(0)} s; the file is ${durationSeconds.toFixed(1)} s`,
+        reason: `${episodes} episodes of at least ${minSeconds} s need ${(episodes * minSeconds).toFixed(0)} s; the file is ${(totalFrames / fps).toFixed(1)} s`,
       };
     }
-    if (episodes * maxFrames < lastFrame) {
+    if (episodes * maxFrames < totalFrames) {
       return {
         ok: false,
-        reason: `${episodes} episodes of at most ${maxSeconds} s cover ${(episodes * maxSeconds).toFixed(0)} s; the file is ${durationSeconds.toFixed(1)} s`,
+        reason: `${episodes} episodes of at most ${maxSeconds} s cover ${(episodes * maxSeconds).toFixed(0)} s; the file is ${(totalFrames / fps).toFixed(1)} s`,
       };
     }
   }
 
   // Evidence, plus blind positions where the lengths may need a cut nothing shows.
   const points = new Map();
-  for (const candidate of input.candidates) points.set(candidate.frame, candidate);
+  for (const candidate of input.candidates) {
+    if (candidate.frame > startFrame && candidate.frame < lastFrame) {
+      points.set(candidate.frame, candidate);
+    }
+  }
   const blindStep = Math.max(1, Math.round(rules.blindStepSeconds * fps));
-  for (let frame = blindStep; frame < lastFrame; frame += blindStep) {
+  for (let frame = startFrame + blindStep; frame < lastFrame; frame += blindStep) {
     if (!points.has(frame)) points.set(frame, { frame, time: frame / fps, score: 0, evidence: [] });
   }
   const nodes = [
-    { frame: 0, score: 0, evidence: [] },
+    { frame: startFrame, score: 0, evidence: [] },
     ...[...points.values()].sort((a, b) => a.frame - b.frame),
     { frame: lastFrame, score: 0, evidence: [] },
   ];
-  const typical = episodes ? lastFrame / episodes : (minFrames + maxFrames) / 2;
+  const typical = episodes ? totalFrames / episodes : (minFrames + maxFrames) / 2;
   const lengthCost = (frames) => (rules.lengthWeight * Math.abs(frames - typical)) / typical;
 
   const count = nodes.length;
-  const maxK = episodes ?? Math.ceil(lastFrame / Math.max(1, minFrames));
+  const maxK = episodes ?? Math.ceil(totalFrames / Math.max(1, minFrames));
   // best[k][i]: best value reaching node i with k segments; from[k][i]: previous node.
   const best = Array.from({ length: maxK + 1 }, () => new Float64Array(count).fill(-Infinity));
   const from = Array.from({ length: maxK + 1 }, () => new Int32Array(count).fill(-1));

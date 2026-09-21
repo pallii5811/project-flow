@@ -349,10 +349,70 @@ async function propose() {
     scenes: measured.scenes,
     luma: measured.luma,
   });
+  // Drop leading dead air (silent or black leader, docs/content-operations.md §7)
+  let leaderEndSeconds = 0;
+  const leadingSilence = measured.silence.find((s) => s.start <= 0.2 && s.end !== null);
+  if (
+    leadingSilence &&
+    (leadingSilence.duration ?? leadingSilence.end - leadingSilence.start) >= QUALITY_RULES.silenceOpeningMaxSeconds
+  ) {
+    leaderEndSeconds = Math.max(leaderEndSeconds, leadingSilence.end);
+  }
+  const leadingBlack = measured.black.find((b) => b.start <= 0.2 && b.end !== null);
+  if (
+    leadingBlack &&
+    (leadingBlack.duration ?? leadingBlack.end - leadingBlack.start) >= QUALITY_RULES.blackOpeningMaxSeconds
+  ) {
+    leaderEndSeconds = Math.max(leaderEndSeconds, leadingBlack.end);
+  }
+
+  let startFrame = 0;
+  if (leaderEndSeconds > 0) {
+    const nearbyScene = measured.scenes.find((s) => Math.abs(s.time - leaderEndSeconds) <= 1.5);
+    const snapSeconds = nearbyScene ? nearbyScene.time : leaderEndSeconds;
+    startFrame = Math.round(snapSeconds * info.fps);
+    console.error(
+      `split-compilation: dropping ${snapSeconds.toFixed(2)} s leader (startFrame: ${startFrame})`,
+    );
+  }
+
+  // Drop trailing silence or black
+  let trailerStartSeconds = durationSeconds;
+  const trailingSilence = measured.silence.find(
+    (s) => (s.end === null || s.end >= durationSeconds - 0.2) && s.start < durationSeconds,
+  );
+  if (
+    trailingSilence &&
+    (trailingSilence.duration ?? durationSeconds - trailingSilence.start) >= QUALITY_RULES.silenceOpeningMaxSeconds
+  ) {
+    trailerStartSeconds = Math.min(trailerStartSeconds, trailingSilence.start);
+  }
+  const trailingBlack = measured.black.find(
+    (b) => (b.end === null || b.end >= durationSeconds - 0.2) && b.start < durationSeconds,
+  );
+  if (
+    trailingBlack &&
+    (trailingBlack.duration ?? durationSeconds - trailingBlack.start) >= QUALITY_RULES.blackOpeningMaxSeconds
+  ) {
+    trailerStartSeconds = Math.min(trailerStartSeconds, trailingBlack.start);
+  }
+
+  let endFrame = info.frames;
+  if (trailerStartSeconds < durationSeconds) {
+    const nearbyScene = measured.scenes.find((s) => Math.abs(s.time - trailerStartSeconds) <= 1.5);
+    const snapSeconds = nearbyScene ? nearbyScene.time : trailerStartSeconds;
+    endFrame = Math.round(snapSeconds * info.fps);
+    console.error(
+      `split-compilation: dropping ${(durationSeconds - snapSeconds).toFixed(2)} s trailer (endFrame: ${endFrame})`,
+    );
+  }
+
   const choice = chooseCuts({
     fps: info.fps,
     durationSeconds,
     candidates,
+    startFrame,
+    endFrame,
     episodes: episodes.length > 0 ? episodes.length : null,
     minSeconds: minMs / 1000,
     maxSeconds: maxMs / 1000,
@@ -402,7 +462,8 @@ async function propose() {
       width: info.width,
       height: info.height,
     },
-    endFrame: info.frames,
+    startFrame,
+    endFrame,
     cuts: choice.cuts,
     episodes: episodes.length,
     crop: pillarbox.pillarboxed ? { ...pillarbox.crop, apply: false, lowerQuality: true } : null,
