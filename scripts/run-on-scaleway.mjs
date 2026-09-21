@@ -545,7 +545,7 @@ async function main() {
     });
     say("the machine has node and the pinned ffmpeg");
 
-    await sendWorkingCopy(remote);
+    await sendWorkingCopy(remote, plan.slug);
 
     const started = Date.now();
     const result = await remote.run({
@@ -593,8 +593,8 @@ async function main() {
  * machine, and a token that outlives a run is exactly what must not exist
  * there.
  */
-async function sendWorkingCopy(remote) {
-  const commit = flag("--commit", process.env.GITHUB_SHA ?? "HEAD");
+async function sendWorkingCopy(remote, series = null) {
+  const commit = flag("--commit", "HEAD");
   const dirty = spawnSync("git", ["status", "--porcelain"], { cwd: repoRoot, encoding: "utf8" }).stdout ?? "";
   if (dirty.trim() && commit === "HEAD") {
     say("note: this working copy has uncommitted changes; the machine gets the COMMITTED files of HEAD");
@@ -605,6 +605,17 @@ async function sendWorkingCopy(remote) {
   await remote.sendRepo(archive.stdout);
   if (archiveError.trim()) say(`git archive said: ${archiveError.trim().split("\n")[0]}`);
   say(`sent the repository at ${commit}`);
+
+  if (series) {
+    const seriesDir = join(repoRoot, "content/series", series);
+    if (existsSync(seriesDir)) {
+      const tar = spawn("tar", ["-c", "-f", "-", "-C", repoRoot, `content/series/${series}`], {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      await remote.sendRepo(tar.stdout);
+      say(`sent working files for series ${series}`);
+    }
+  }
 
   const records = join(repoRoot, ".ingest-records");
   if (existsSync(records)) {
