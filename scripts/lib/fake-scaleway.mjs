@@ -113,6 +113,11 @@ export function startFakeScaleway({ secretKey, projectId, zone = "fr-par-1", pol
       return answer(response, 200, { id: projectId, name: "cliffies", organization_id: "org-1" }, entry);
     }
 
+    // IAM API Keys
+    if (method === "GET" && path.startsWith("/iam/v1alpha1/api-keys/")) {
+      return answer(response, 200, { access_key: "SCW123", default_project_id: projectId }, entry);
+    }
+
     const prefix = `/instance/v1/zones/${zone}`;
     if (!path.startsWith(prefix)) return refuse(response, 404, "not_found", `no such path: ${path}`, entry);
     const rest = path.slice(prefix.length);

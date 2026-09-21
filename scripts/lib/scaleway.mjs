@@ -232,6 +232,15 @@ export function createScalewayClient(config, options = {}) {
       return [];
     },
 
+    async getApiKeyInfo(accessKey) {
+      if (!accessKey) return null;
+      try {
+        return await send("GET", `${baseUrl}/iam/v1alpha1/api-keys/${encodeURIComponent(accessKey)}`);
+      } catch {
+        return null;
+      }
+    },
+
     /**
      * An image label ("ubuntu_noble") is not what create-server takes: it
      * takes a UUID. The marketplace answers which image that label is in this

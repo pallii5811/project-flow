@@ -452,6 +452,16 @@ async function main() {
 
   try {
     let effectiveProjectId = config.config.projectId;
+    if (config.config.accessKey) {
+      try {
+        const keyInfo = await api.getApiKeyInfo(config.config.accessKey);
+        if (keyInfo?.default_project_id && keyInfo.default_project_id !== effectiveProjectId) {
+          say(`note: SCW_PROJECT_ID was ${effectiveProjectId}; using default project from API key: ${keyInfo.default_project_id}`);
+          effectiveProjectId = keyInfo.default_project_id;
+        }
+      } catch {}
+    }
+
     try {
       const projects = await api.listProjects();
       if (projects.length > 0) {
