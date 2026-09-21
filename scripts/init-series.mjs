@@ -8,6 +8,14 @@ function extractVideoId(input) {
   return null;
 }
 
+function slugifyVideoId(id) {
+  const sanitized = id
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `yt-${sanitized}`;
+}
+
 async function getTitle(url, videoId) {
   try {
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
@@ -37,7 +45,7 @@ async function main() {
     process.exit(1);
   }
 
-  const slug = `yt-${videoId}`;
+  const slug = slugifyVideoId(videoId);
   const title = await getTitle(input, videoId);
 
   const dir = join(process.cwd(), "content", "series", slug);
