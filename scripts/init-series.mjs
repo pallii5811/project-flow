@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 function extractVideoId(input) {
-  const match = input.match(/(?:youtu\.be\/|v=|\/v\/|embed\/|watch\?v=|\&v=)([^#\&\?\s]{11})/);
+  const match = input.match(/(?:youtu\.be\/|v=|\/v\/|embed\/|watch\?v=|&v=)([^#&?\s]{11})/);
   if (match) return match[1];
   if (/^[a-zA-Z0-9_-]{11}$/.test(input.trim())) return input.trim();
   return null;

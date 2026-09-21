@@ -211,7 +211,9 @@ export function createScalewayClient(config, options = {}) {
           query: { organization_id: config.projectId },
         });
         if (answer?.projects?.length) return answer.projects;
-      } catch {}
+      } catch {
+        // ignore and fallback
+      }
 
       // 2. If config.projectId is already a project ID, fetch that project:
       try {
@@ -223,11 +225,15 @@ export function createScalewayClient(config, options = {}) {
                 query: { organization_id: proj.organization_id },
               });
               if (answer?.projects?.length) return answer.projects;
-            } catch {}
+            } catch {
+              // ignore and fallback
+            }
           }
           return [proj];
         }
-      } catch {}
+      } catch {
+        // ignore and fallback
+      }
 
       return [];
     },

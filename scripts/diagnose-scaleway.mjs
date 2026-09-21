@@ -19,7 +19,11 @@ async function req(name, method, url) {
     });
     const text = await res.text();
     let json = null;
-    try { json = JSON.parse(text); } catch {}
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // ignore non-json responses
+    }
     console.log(`[${res.status}] ${name} ->`, json ? JSON.stringify(json) : text.slice(0, 200));
     return { status: res.status, ok: res.ok, data: json };
   } catch (err) {

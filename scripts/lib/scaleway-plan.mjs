@@ -278,6 +278,7 @@ export const REMOTE = Object.freeze({
 export const COLLECTED = Object.freeze([
   { remote: "repo/packages/feed-domain/src/data/generated", local: "packages/feed-domain/src/data/generated" },
   { remote: "repo/.ingest-records", local: ".ingest-records" },
+  { remote: "repo/content/series", local: "content/series" },
   { remote: "out", local: ".split-work" },
 ]);
 
@@ -410,8 +411,6 @@ export function cloudInit({ publicKey, shutdownMinutes, ffmpegUrl = FFMPEG_URL, 
     `  node scripts/split-compilation.mjs propose "$CLIFFIES_SLUG" --input "${REMOTE.delivery}/delivery.mp4" --out "${REMOTE.out}/$CLIFFIES_SLUG"`,
     `  echo "cliffies-run: auto-confirming cuts"`,
     `  node -e "const fs=require('fs'); const path='${REMOTE.out}/$CLIFFIES_SLUG/$CLIFFIES_SLUG.cuts.json'; const data=JSON.parse(fs.readFileSync(path)); data.confirmed=true; fs.writeFileSync(path, JSON.stringify(data, null, 2)); fs.mkdirSync('${REMOTE.repo}/content/series/$CLIFFIES_SLUG', {recursive:true}); fs.copyFileSync(path, '${REMOTE.repo}/content/series/$CLIFFIES_SLUG/cuts.json');"`,
-    `  echo "cliffies-run: splitting compilation"`,
-    `  node scripts/split-compilation.mjs split "$CLIFFIES_SLUG" --input "${REMOTE.delivery}/delivery.mp4"`,
     `  set +e`,
     `  echo "cliffies-run: starting cloud ingest"`,
     `  node scripts/cloud-ingest.mjs "$CLIFFIES_SLUG" --source "${REMOTE.delivery}/delivery.mp4" --budget-minutes "$CLIFFIES_BUDGET_MINUTES"`,

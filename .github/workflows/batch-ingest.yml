@@ -13,10 +13,12 @@ jobs:
     timeout-minutes: 350
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.ref_name }}
       
       - uses: actions/setup-node@v4
         with:
@@ -35,6 +37,7 @@ jobs:
 
       - name: Process links one by one
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
           SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
           SCW_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
@@ -80,7 +83,7 @@ jobs:
             
             echo "Spawning dynamic Scaleway machine for $slug..."
             
-            # This calls Claude's script which spawns the machine, runs auto-publish, and destroys the machine.
+            # This calls the script which spawns the machine, runs auto-publish, and destroys the machine.
             # It also automatically extracts the manifest to the local workspace via COLLECTED mechanism.
             node scripts/run-on-scaleway.mjs "$slug" --links "$url" --mode auto-publish --budget-minutes 360
             
@@ -88,14 +91,17 @@ jobs:
               cp ".split-work/$slug/$slug.cuts.json" "content/series/$slug/cuts.json"
             fi
             
-            if [ -n "$(git status --porcelain packages/feed-domain/src/data/generated .split-work content/series)" ]; then
-              git add packages/feed-domain/src/data/generated .split-work content/series
+            # Clean up the processed URL from links.txt immediately
+            grep -v -F "$url" links.txt > links.txt.tmp && mv links.txt.tmp links.txt
+            
+            if [ -n "$(git status --porcelain packages/feed-domain/src/data/generated .split-work content/series links.txt)" ]; then
+              git add packages/feed-domain/src/data/generated .split-work content/series links.txt
               git commit -m "Ingest: $slug published by dynamic worker [skip ci]" || true
             fi
             
-            # Pull before push to avoid conflicts if triggered multiple times
-            git pull --rebase origin HEAD || true
-            git push origin HEAD || true
+            # Pull before push to avoid conflicts
+            git pull --rebase origin "${{ github.ref_name }}" || true
+            git push origin "${{ github.ref_name }}" || true
             
             processed=$((processed + 1))
             
@@ -106,14 +112,18 @@ jobs:
             fi
           done
           
-          # Clean up the URLs we just processed from links.txt
-          tail -n +$((processed + 1 + $(grep -c "^#" links.txt || echo 0))) links.txt > links.txt.tmp || true
-          cat links.txt.tmp > links.txt
-          git add links.txt
-          git commit -m "chore: clean processed links [skip ci]" || true
-          git push origin HEAD || true
+          remaining_urls=()
+          while IFS= read -r line || [ -n "$line" ]; do
+            line_trimmed=$(echo "$line" | xargs)
+            if [ -n "$line_trimmed" ] && [[ "$line_trimmed" != "#"* ]]; then
+              remaining_urls+=("$line_trimmed")
+            fi
+          done < links.txt
           
-          if [ ${#urls[@]} -gt 5 ]; then
-             echo "Still more URLs left. Committing links.txt above will NOT trigger a new run because of [skip ci]."
-             echo "To continue, manually trigger or remove [skip ci]."
+          if [ ${#remaining_urls[@]} -gt 0 ]; then
+            echo "There are still ${#remaining_urls[@]} URLs remaining in links.txt."
+            echo "Triggering next batch run automatically..."
+            gh workflow run batch-ingest.yml --ref "${{ github.ref_name }}" || true
+          else
+            echo "All URLs in links.txt have been processed!"
           fi

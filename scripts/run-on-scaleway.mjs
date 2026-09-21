@@ -459,7 +459,9 @@ async function main() {
           say(`note: SCW_PROJECT_ID was ${effectiveProjectId}; using default project from API key: ${keyInfo.default_project_id}`);
           effectiveProjectId = keyInfo.default_project_id;
         }
-      } catch {}
+      } catch {
+        // ignore if api key info is unavailable
+      }
     }
 
     try {

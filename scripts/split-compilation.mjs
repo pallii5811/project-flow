@@ -146,7 +146,7 @@ function probe(path) {
   };
 }
 
-function readDelivery(root) {
+function readDelivery(root, { allowEmptyEpisodes = false } = {}) {
   if (!slug || !isSlug(slug)) die(`"${slug ?? ""}" is not a series slug`);
   const dir = join(root, slug);
   const file = join(dir, "series.json");
@@ -157,14 +157,17 @@ function readDelivery(root) {
   } catch (error) {
     die(`${file} is not readable JSON: ${error.message}`);
   }
-  if (!Array.isArray(delivery.episodes) || delivery.episodes.length === 0) die("series.json lists no episodes");
-  const numbering = checkEpisodeNumbers(delivery.episodes);
+  if (!Array.isArray(delivery.episodes) || (!allowEmptyEpisodes && delivery.episodes.length === 0)) {
+    die("series.json lists no episodes");
+  }
+  const numbering = checkEpisodeNumbers(delivery.episodes ?? []);
   if (numbering.length > 0) die(numbering.map((entry) => `[${entry.code}] ${entry.message}`).join("; "));
   const range = delivery.episodeDurationMs ?? {};
   return {
     dir,
+    file,
     delivery,
-    episodes: [...delivery.episodes].sort((a, b) => a.episodeNumber - b.episodeNumber),
+    episodes: [...(delivery.episodes ?? [])].sort((a, b) => a.episodeNumber - b.episodeNumber),
     minMs: Number.isFinite(range.min) ? range.min : QUALITY_RULES.durationMinMs,
     maxMs: Number.isFinite(range.max) ? range.max : QUALITY_RULES.durationMaxMs,
   };
@@ -320,7 +323,7 @@ function contactSheet(input, fps, cut, index, workDir, sheetPath) {
 
 async function propose() {
   const root = resolve(flag("--delivery-root") ?? join(repoRoot, "content", "series"));
-  const { delivery, episodes, minMs, maxMs } = readDelivery(root);
+  const { file: deliveryFile, delivery, episodes, minMs, maxMs } = readDelivery(root, { allowEmptyEpisodes: true });
   const input = inputPath();
   const out = resolve(flag("--out") ?? join(repoRoot, ".split-work", slug));
   const workDir = join(out, "work");
@@ -350,11 +353,23 @@ async function propose() {
     fps: info.fps,
     durationSeconds,
     candidates,
-    episodes: episodes.length,
+    episodes: episodes.length > 0 ? episodes.length : null,
     minSeconds: minMs / 1000,
     maxSeconds: maxMs / 1000,
   });
   if (!choice.ok) die(`no proposal: ${choice.reason}`);
+
+  const episodeCount = choice.cuts.length + 1;
+  if (episodes.length === 0) {
+    delivery.episodes = Array.from({ length: episodeCount }, (_, i) => ({
+      episodeNumber: i + 1,
+      master: `masters/episode-${i + 1}.mp4`,
+      title: `Episode ${i + 1}`,
+    }));
+    writeFileSync(deliveryFile, `${JSON.stringify(delivery, null, 2)}\n`, "utf8");
+    episodes.push(...delivery.episodes);
+    console.error(`split-compilation: auto-populated ${episodeCount} episodes in ${basename(deliveryFile)}`);
+  }
 
   const pillarbox = pillarboxVerdict(measured.crop, info.width, info.height);
   const notes = checkSplitPermission(delivery).map(
