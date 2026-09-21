@@ -278,6 +278,7 @@ export function createScalewayClient(config, options = {}) {
         body: {
           name,
           project: config.projectId,
+          project_id: config.projectId,
           commercial_type: commercialType,
           image,
           tags,
