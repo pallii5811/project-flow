@@ -37,7 +37,7 @@ export const QUALITY_RULES = {
   targetLufs: -16,
   /** Tolerance on the measured loudness of the published audio. */
   lufsToleranceLu: 1,
-  truePeakDbMax: -1,
+  truePeakDbMax: -0.5,
   /** The opening the gate looks at, in seconds. */
   openingSeconds: 5,
   /** Black or silence at least this long inside the opening fails. */

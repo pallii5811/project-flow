@@ -71,6 +71,7 @@ const GATE_VERSION = 3;
 
 /** Vertical ladder: height, video cap, audio bitrate. */
 const LADDER = [
+  { height: 360, maxrateKbps: 450, audioKbps: 64 },
   { height: 640, maxrateKbps: 600, audioKbps: 64 },
   { height: 960, maxrateKbps: 1400, audioKbps: 96 },
   { height: 1280, maxrateKbps: 2500, audioKbps: 128 },
@@ -229,7 +230,7 @@ const firstPass = runCapturingStderr("ffmpeg", [
   "-vf",
   `blackdetect=d=0.3:pix_th=0.10,freezedetect=n=-60dB:d=${QUALITY_RULES.freezeOpeningMaxSeconds}`,
   "-af",
-  `silencedetect=n=-50dB:d=1,loudnorm=I=${QUALITY_RULES.targetLufs}:TP=-1.5:LRA=11:print_format=json`,
+  `silencedetect=n=-50dB:d=1,loudnorm=I=${QUALITY_RULES.targetLufs}:TP=-2.0:LRA=11:print_format=json`,
   "-f",
   "null",
   "-",
@@ -269,10 +270,10 @@ const scales = rungs.map(
 );
 /** Second loudnorm pass: the measurements of the first one, applied once, then split. */
 const loudnorm =
-  `[0:a:${audioIndex}]loudnorm=I=${QUALITY_RULES.targetLufs}:TP=-1.5:LRA=11:` +
+  `[0:a:${audioIndex}]loudnorm=I=${QUALITY_RULES.targetLufs}:TP=-2.0:LRA=11:` +
   `measured_I=${measuredInput.inputI}:measured_TP=${measuredInput.inputTp}:` +
   `measured_LRA=${measuredInput.inputLra}:measured_thresh=${measuredInput.inputThresh}:` +
-  `offset=${measuredInput.targetOffset}:linear=true,aresample=48000,` +
+  `offset=${measuredInput.targetOffset}:linear=true,alimiter=limit=-1.2dB:level=false,aresample=48000,` +
   `asplit=${rungs.length}${rungs.map((_, i) => `[a${i}]`).join("")}`;
 
 const ffmpegArgs = [
