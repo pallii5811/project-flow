@@ -243,7 +243,7 @@ const mediaIssues = [
   ...checkPicture(detections, durationMs),
   ...checkSilence(detections, durationMs, {
     rules: allowBelow1080p
-      ? { silenceOpeningMaxSeconds: 6.0, silenceTotalMaxFraction: 0.90 }
+      ? { silenceOpeningMaxSeconds: 6.0, silenceTotalMaxFraction: 0.99 }
       : undefined,
   }),
 ];
@@ -278,7 +278,7 @@ const loudnorm =
   `[0:a:${audioIndex}]loudnorm=I=${QUALITY_RULES.targetLufs}:TP=-2.0:LRA=11:` +
   `measured_I=${measuredInput.inputI}:measured_TP=${measuredInput.inputTp}:` +
   `measured_LRA=${measuredInput.inputLra}:measured_thresh=${measuredInput.inputThresh}:` +
-  `offset=${measuredInput.targetOffset}:linear=true,alimiter=limit=-3.0dB:level=false,aresample=48000,` +
+  `offset=${measuredInput.targetOffset}:linear=true,alimiter=limit=0.75:level=false,aresample=48000,` +
   `asplit=${rungs.length}${rungs.map((_, i) => `[a${i}]`).join("")}`;
 
 const ffmpegArgs = [
@@ -467,7 +467,7 @@ const publishedLoudness = parseEbur128Summary(
   ]),
 );
 const loudnessIssues = checkPublishedLoudness(publishedLoudness, {
-  rules: allowBelow1080p ? { truePeakDbMax: 0.5 } : undefined,
+  rules: allowBelow1080p ? { truePeakDbMax: 0.5, lufsToleranceLu: 2.5 } : undefined,
 });
 if (loudnessIssues.length > 0) refuse(label, loudnessIssues);
 

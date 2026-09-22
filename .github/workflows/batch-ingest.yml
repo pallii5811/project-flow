@@ -97,8 +97,8 @@ jobs:
               # Clean up the processed URL from links.txt immediately
               grep -v -F "$url" links.txt > links.txt.tmp && mv links.txt.tmp links.txt
               
-              if [ -n "$(git status --porcelain packages/feed-domain/src/data/generated .split-work content/series links.txt)" ]; then
-                git add packages/feed-domain/src/data/generated .split-work content/series links.txt
+              if [ -n "$(git status --porcelain packages/feed-domain/src/data/generated content/series links.txt)" ]; then
+                git add packages/feed-domain/src/data/generated content/series links.txt
                 git commit -m "Ingest: $slug published by dynamic worker [skip ci]" || true
               fi
               

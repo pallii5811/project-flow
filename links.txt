@@ -1,11 +1,11 @@
 # Source URLs for media ingest (one per line)
+https://youtu.be/i3HCF-WW08E?si=4IwikXmvdXnjgemN
 https://youtu.be/eI28raQMgko?si=5ghlVHv97NFvTYVw
 https://youtu.be/tOBNfE7OWzo?si=2pit6HjnmroOpwfJ
 https://youtu.be/jNszM-GxVgU?si=G1_Mpui1ZxXYyE7t
 https://youtu.be/iA9fXm8VXyw?si=aomCJT27b9xX3qwb
 https://youtu.be/ke-CYDtfkYs?si=b_ISMI4OaPb7XE4k
 https://youtu.be/WNdiGl5oBDM?si=kMyj_w8gWKJeBc-l
-https://youtu.be/i3HCF-WW08E?si=4IwikXmvdXnjgemN
 https://youtu.be/WxOiibQyLZA?si=NAXrJmgaHCkSumci
 https://youtu.be/XXRi_5h66rw?si=8P-bJBrNG5rziqPu
 https://youtu.be/B7UzMjAv9x4?si=0kH9k98-IYGZbpW5
