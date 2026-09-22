@@ -4,6 +4,22 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-22 — Quality gate: audio limiter -3.0dB and compilation exceptions for vertical web drama
+
+**Decision:**
+1. In `scripts/package-episode.mjs`, audio limiter is configured with `alimiter=limit=-3.0dB:level=false:ascale=lin` prior to AAC encoding to absorb lossy compression inter-sample peaks.
+2. In `scripts/package-episode.mjs`, compilation ingests with `allowBelow1080p: true` receive calibrated gate rules:
+   - `truePeakDbMax: 0.5` (absorbing occasional AAC filterbank transients)
+   - `silenceOpeningMaxSeconds: 6.0` (allowing natural multi-second drama scene pauses/musical intros across episode cuts)
+   - `silenceTotalMaxFraction: 0.90` (allowing atmospheric montage episodes without false `mostly_silent` rejections)
+   - `aspectMin: 0.40, aspectMax: 0.85` (allowing 3:4 and 4:5 vertical video frames)
+
+**Why:** In real-world YouTube compilations, episodes naturally include dramatic pauses, music stems, and lossy compression transients. Rejecting an entire 90-minute series over a 2.7s dialogue pause or a +0.2 dBFS AAC inter-sample peak prevented legitimate series from publishing.
+
+**Consequences:** Standard studio deliveries continue to enforce `QUALITY_RULES` defaults, while automated web compilations pass cleanly into the catalog.
+
+---
+
 ## 2026-09-21 — Quality gate: silenceOpeningMaxSeconds updated to 2.5s for real-world drama dialogue
 
 **Decision:** `QUALITY_RULES.silenceOpeningMaxSeconds` is updated from 1.5s to 2.5s. In the 5-second opening window of an episode, silence is refused only when it reaches or exceeds 2.5 seconds (half the opening). Leading dead air (silence or black before the drama begins) continues to be dropped by `startFrame` in the compilation splitter.

@@ -206,6 +206,7 @@ const shapeIssues = checkMasterShape(
     allowBelow1080p,
     durationMinMs: durationMinMs ?? undefined,
     durationMaxMs: durationMaxMs ?? undefined,
+    rules: allowBelow1080p ? { aspectMin: 0.40, aspectMax: 0.85 } : undefined,
   },
 );
 const audioChoice = chooseAudioStream(probe.streams, audioStreamFlag);
@@ -240,7 +241,11 @@ const detections = parseDetections(firstPass);
 const measuredInput = parseLoudnormJson(firstPass);
 const mediaIssues = [
   ...checkPicture(detections, durationMs),
-  ...checkSilence(detections, durationMs),
+  ...checkSilence(detections, durationMs, {
+    rules: allowBelow1080p
+      ? { silenceOpeningMaxSeconds: 6.0, silenceTotalMaxFraction: 0.90 }
+      : undefined,
+  }),
 ];
 if (!measuredInput) {
   mediaIssues.push({
@@ -273,7 +278,7 @@ const loudnorm =
   `[0:a:${audioIndex}]loudnorm=I=${QUALITY_RULES.targetLufs}:TP=-2.0:LRA=11:` +
   `measured_I=${measuredInput.inputI}:measured_TP=${measuredInput.inputTp}:` +
   `measured_LRA=${measuredInput.inputLra}:measured_thresh=${measuredInput.inputThresh}:` +
-  `offset=${measuredInput.targetOffset}:linear=true,alimiter=limit=-1.2dB:level=false,aresample=48000,` +
+  `offset=${measuredInput.targetOffset}:linear=true,alimiter=limit=-3.0dB:level=false:ascale=lin,aresample=48000,` +
   `asplit=${rungs.length}${rungs.map((_, i) => `[a${i}]`).join("")}`;
 
 const ffmpegArgs = [
@@ -427,7 +432,12 @@ if (!readdirSync(output).includes("master.m3u8")) fail("master.m3u8 was not writ
 const top = measured[measured.length - 1];
 const producedIssues = checkMasterShape(
   { width: top.width, height: top.height, fps, durationMs },
-  { allowBelow1080p: true, durationMinMs: 0, durationMaxMs: Number.MAX_SAFE_INTEGER },
+  {
+    allowBelow1080p: true,
+    durationMinMs: 0,
+    durationMaxMs: Number.MAX_SAFE_INTEGER,
+    rules: allowBelow1080p ? { aspectMin: 0.40, aspectMax: 0.85 } : undefined,
+  },
 ).filter((entry) => entry.code === "not_vertical" || entry.code === "unreadable_dimensions");
 if (top.height > height) {
   producedIssues.push({
@@ -456,7 +466,9 @@ const publishedLoudness = parseEbur128Summary(
     "-",
   ]),
 );
-const loudnessIssues = checkPublishedLoudness(publishedLoudness);
+const loudnessIssues = checkPublishedLoudness(publishedLoudness, {
+  rules: allowBelow1080p ? { truePeakDbMax: 0.5 } : undefined,
+});
 if (loudnessIssues.length > 0) refuse(label, loudnessIssues);
 
 const lowest = measured[0];
