@@ -309,12 +309,33 @@ export function createScalewayClient(config, options = {}) {
     },
 
     async listVolumes({ tag = null } = {}) {
-      const answer = await send("GET", instances("/volumes"), { query: { tags: tag, per_page: 100 } });
-      return answer?.volumes ?? [];
+      const results = [];
+      try {
+        const answer = await send("GET", instances("/volumes"), { query: { tags: tag, per_page: 100 } });
+        if (answer?.volumes) results.push(...answer.volumes);
+      } catch {
+        // ignore instance volume error
+      }
+      try {
+        const blockAnswer = await send("GET", `${baseUrl}/block/v1/zones/${zone}/volumes`, {
+          query: { tags: tag, page_size: 100 },
+        });
+        if (blockAnswer?.volumes) {
+          for (const bv of blockAnswer.volumes) {
+            if (!results.some((v) => v.id === bv.id)) {
+              results.push(bv);
+            }
+          }
+        }
+      } catch {
+        // ignore block volume error
+      }
+      return results;
     },
 
     async deleteVolume(id) {
       await maybe(send("DELETE", instances(`/volumes/${encodeURIComponent(id)}`)));
+      await maybe(send("DELETE", `${baseUrl}/block/v1/zones/${zone}/volumes/${encodeURIComponent(id)}`));
     },
 
     async createServer({ name, commercialType, image, tags, projectId = null }) {

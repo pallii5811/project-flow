@@ -126,10 +126,13 @@ jobs:
             fi
           done < links.txt
           
-          if [ ${#remaining_urls[@]} -gt 0 ]; then
-            echo "There are still ${#remaining_urls[@]} URLs remaining in links.txt."
+          if [ "$processed" -gt 0 ] && [ ${#remaining_urls[@]} -gt 0 ]; then
+            echo "Processed $processed series this run. There are still ${#remaining_urls[@]} URLs remaining in links.txt."
             echo "Triggering next batch run automatically..."
             gh workflow run batch-ingest.yml --ref "${{ github.ref_name }}" || true
-          else
+          elif [ ${#remaining_urls[@]} -eq 0 ]; then
             echo "All URLs in links.txt have been processed!"
+          else
+            echo "No URLs were processed in this run ($processed successful). Halting to prevent infinite loop. Check logs for errors."
+            exit 1
           fi
