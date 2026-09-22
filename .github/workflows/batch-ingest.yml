@@ -67,6 +67,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
+          # Clean up any leftover machines from cancelled runs
+          node scripts/run-on-scaleway.mjs --sweep --older-than-minutes 0 --force || true
+          
           processed=0
           for url in "${urls[@]}"; do
             echo "----------------------------------------"
