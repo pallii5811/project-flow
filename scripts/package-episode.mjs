@@ -278,7 +278,7 @@ const loudnorm =
   `[0:a:${audioIndex}]loudnorm=I=${QUALITY_RULES.targetLufs}:TP=-2.0:LRA=11:` +
   `measured_I=${measuredInput.inputI}:measured_TP=${measuredInput.inputTp}:` +
   `measured_LRA=${measuredInput.inputLra}:measured_thresh=${measuredInput.inputThresh}:` +
-  `offset=${measuredInput.targetOffset}:linear=true,alimiter=limit=-3.0dB:level=false:ascale=lin,aresample=48000,` +
+  `offset=${measuredInput.targetOffset}:linear=true,alimiter=limit=-3.0dB:level=false,aresample=48000,` +
   `asplit=${rungs.length}${rungs.map((_, i) => `[a${i}]`).join("")}`;
 
 const ffmpegArgs = [
