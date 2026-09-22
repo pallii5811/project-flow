@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "seriesId": "series_yt-ei28raqmgko",
+  "seriesSlug": "yt-ei28raqmgko",
+  "title": "📺【FULL】 You Bullied the Wrong Woman | ShortMax - Watch Dramas & Show",
+  "status": "published",
+  "defaultLocale": "en",
+  "producerId": "prod_standin_inhouse",
+  "producerOfRecord": "Automated YouTube Ingest",
+  "socialClipsAllowed": false,
+  "allowBelow1080p": true,
+  "allowNoCaptions": true,
+  "episodeDurationMs": {
+    "min": 45000,
+    "max": 180000
+  },
+  "genres": [],
+  "tropes": [],
+  "rights": {
+    "territories": [
+      "WORLD"
+    ],
+    "languages": [
+      "en"
+    ],
+    "windowStart": "2026-09-22T13:00:06.732Z",
+    "windowEnd": null
+  },
+  "splitAllowed": true,
+  "splitPermission": {
+    "grantedOn": "2026-09-22",
+    "source": "Automated end-to-end pipeline confirmation"
+  },
+  "episodes": []
+}
