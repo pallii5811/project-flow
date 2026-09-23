@@ -5,11 +5,13 @@
  */
 import type { SeriesManifest } from "../../content/seriesManifest";
 import { SIGNAL_NIGHT_MANIFEST } from "./signal-night";
+import { YT_EI28RAQMGKO_MANIFEST } from "./yt-ei28raqmgko";
 import { YT_WXOIIBQYLZA_MANIFEST } from "./yt-wxoiibqylza";
 import { YT_XXRI_5H66RW_MANIFEST } from "./yt-xxri-5h66rw";
 
 export const SERIES_MANIFESTS: SeriesManifest[] = [
   SIGNAL_NIGHT_MANIFEST,
+  YT_EI28RAQMGKO_MANIFEST,
   YT_WXOIIBQYLZA_MANIFEST,
   YT_XXRI_5H66RW_MANIFEST,
 ];

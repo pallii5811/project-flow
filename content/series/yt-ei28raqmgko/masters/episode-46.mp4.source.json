@@ -1,0 +1,15 @@
+{
+  "splitVersion": 1,
+  "identity": "ffc2ee7ef458a36f68885d13a8809f98b360eacd327d083e4cb0477781535c12",
+  "source": {
+    "file": "delivery.mp4",
+    "sha256": "29ab9178f8faab8bd41319496c678f092997b57687f45d7a08bef70baa4a1082"
+  },
+  "startFrame": 52204,
+  "endFrame": 53308,
+  "frameRate": "24/1",
+  "start": "00:36:15.167",
+  "end": "00:37:01.167",
+  "cropped": null,
+  "masterSha256": "092a70329a03f7d69802341d14acdbb79777c81fca390dc077ae188f21c2aa70"
+}

@@ -1,0 +1,1313 @@
+{
+  "schemaVersion": 1,
+  "seriesSlug": "yt-i3hcf-ww08e",
+  "confirmed": true,
+  "source": {
+    "file": "delivery.mp4",
+    "sha256": "fe6704fcbfe44f2beee08a3a6e0c371333b2a2ca49dbd9bd1a7c36a978f9a805",
+    "bytes": 299197088,
+    "durationMs": 6639700,
+    "frames": 199189,
+    "frameRate": "30/1",
+    "width": 202,
+    "height": 360
+  },
+  "startFrame": 0,
+  "endFrame": 199189,
+  "crop": null,
+  "cuts": [
+    {
+      "between": [
+        1,
+        2
+      ],
+      "frame": 3264,
+      "at": "00:01:48.800",
+      "confidence": "high",
+      "why": "picture cut (score 20.6) + 0.63 s of silence",
+      "contactSheet": "contact/cut-01.jpg"
+    },
+    {
+      "between": [
+        2,
+        3
+      ],
+      "frame": 6116,
+      "at": "00:03:23.867",
+      "confidence": "low",
+      "why": "picture cut (score 17.8) + 2.27 s of silence",
+      "rivals": [
+        "00:03:26.300"
+      ],
+      "contactSheet": "contact/cut-02.jpg"
+    },
+    {
+      "between": [
+        3,
+        4
+      ],
+      "frame": 9486,
+      "at": "00:05:16.200",
+      "confidence": "high",
+      "why": "picture cut (score 22.0) + 0.98 s of silence",
+      "contactSheet": "contact/cut-03.jpg"
+    },
+    {
+      "between": [
+        4,
+        5
+      ],
+      "frame": 10935,
+      "at": "00:06:04.500",
+      "confidence": "high",
+      "why": "picture cut (score 20.0) + 0.83 s of silence",
+      "contactSheet": "contact/cut-04.jpg"
+    },
+    {
+      "between": [
+        5,
+        6
+      ],
+      "frame": 12291,
+      "at": "00:06:49.700",
+      "confidence": "high",
+      "why": "picture cut (score 21.8) + 0.63 s of silence",
+      "contactSheet": "contact/cut-05.jpg"
+    },
+    {
+      "between": [
+        6,
+        7
+      ],
+      "frame": 14858,
+      "at": "00:08:15.267",
+      "confidence": "low",
+      "why": "picture cut (score 14.5) + 0.70 s of silence",
+      "rivals": [
+        "00:08:16.500"
+      ],
+      "contactSheet": "contact/cut-06.jpg"
+    },
+    {
+      "between": [
+        7,
+        8
+      ],
+      "frame": 17252,
+      "at": "00:09:35.067",
+      "confidence": "high",
+      "why": "fade to black, 0.17 s of black ending here + 0.41 s of silence",
+      "contactSheet": "contact/cut-07.jpg"
+    },
+    {
+      "between": [
+        8,
+        9
+      ],
+      "frame": 18839,
+      "at": "00:10:27.967",
+      "confidence": "high",
+      "why": "picture cut (score 17.4) + 0.54 s of silence",
+      "contactSheet": "contact/cut-08.jpg"
+    },
+    {
+      "between": [
+        9,
+        10
+      ],
+      "frame": 20260,
+      "at": "00:11:15.333",
+      "confidence": "high",
+      "why": "picture cut (score 12.6) + 1.12 s of silence",
+      "contactSheet": "contact/cut-09.jpg"
+    },
+    {
+      "between": [
+        10,
+        11
+      ],
+      "frame": 21877,
+      "at": "00:12:09.233",
+      "confidence": "low",
+      "why": "picture cut (score 16.7) + 0.53 s of silence",
+      "rivals": [
+        "00:12:05.833"
+      ],
+      "contactSheet": "contact/cut-10.jpg"
+    },
+    {
+      "between": [
+        11,
+        12
+      ],
+      "frame": 23764,
+      "at": "00:13:12.133",
+      "confidence": "low",
+      "why": "picture cut (score 24.7) + 1.16 s of silence",
+      "rivals": [
+        "00:13:10.467",
+        "00:13:16.133"
+      ],
+      "contactSheet": "contact/cut-11.jpg"
+    },
+    {
+      "between": [
+        12,
+        13
+      ],
+      "frame": 25194,
+      "at": "00:13:59.800",
+      "confidence": "high",
+      "why": "picture cut (score 16.7) + 0.60 s of silence",
+      "contactSheet": "contact/cut-12.jpg"
+    },
+    {
+      "between": [
+        13,
+        14
+      ],
+      "frame": 27452,
+      "at": "00:15:15.067",
+      "confidence": "low",
+      "why": "picture cut (score 9.9) + 2.59 s of silence",
+      "rivals": [
+        "00:15:17.700",
+        "00:15:18.967"
+      ],
+      "contactSheet": "contact/cut-13.jpg"
+    },
+    {
+      "between": [
+        14,
+        15
+      ],
+      "frame": 28816,
+      "at": "00:16:00.533",
+      "confidence": "low",
+      "why": "picture cut (score 19.0) + 1.81 s of silence",
+      "rivals": [
+        "00:15:56.467",
+        "00:15:58.433"
+      ],
+      "contactSheet": "contact/cut-14.jpg"
+    },
+    {
+      "between": [
+        15,
+        16
+      ],
+      "frame": 30639,
+      "at": "00:17:01.300",
+      "confidence": "low",
+      "why": "picture cut (score 30.2) + 1.80 s of silence",
+      "rivals": [
+        "00:16:58.300",
+        "00:16:59.933",
+        "00:17:04.100"
+      ],
+      "contactSheet": "contact/cut-15.jpg"
+    },
+    {
+      "between": [
+        16,
+        17
+      ],
+      "frame": 31996,
+      "at": "00:17:46.533",
+      "confidence": "low",
+      "why": "picture cut (score 24.7) + 1.22 s of silence",
+      "rivals": [
+        "00:17:42.033",
+        "00:17:46.100",
+        "00:17:50.767"
+      ],
+      "contactSheet": "contact/cut-16.jpg"
+    },
+    {
+      "between": [
+        17,
+        18
+      ],
+      "frame": 33442,
+      "at": "00:18:34.733",
+      "confidence": "high",
+      "why": "fade to black, 0.17 s of black ending here + 2.34 s of silence",
+      "contactSheet": "contact/cut-17.jpg"
+    },
+    {
+      "between": [
+        18,
+        19
+      ],
+      "frame": 34907,
+      "at": "00:19:23.567",
+      "confidence": "low",
+      "why": "picture cut (score 13.9) + 2.31 s of silence",
+      "rivals": [
+        "00:19:19.033",
+        "00:19:27.033"
+      ],
+      "contactSheet": "contact/cut-18.jpg"
+    },
+    {
+      "between": [
+        19,
+        20
+      ],
+      "frame": 37293,
+      "at": "00:20:43.100",
+      "confidence": "high",
+      "why": "fade to black, 0.10 s of black ending here + 0.71 s of silence",
+      "contactSheet": "contact/cut-19.jpg"
+    },
+    {
+      "between": [
+        20,
+        21
+      ],
+      "frame": 38970,
+      "at": "00:21:39.000",
+      "confidence": "high",
+      "why": "fade to black, 0.07 s of black ending here",
+      "contactSheet": "contact/cut-20.jpg"
+    },
+    {
+      "between": [
+        21,
+        22
+      ],
+      "frame": 40378,
+      "at": "00:22:25.933",
+      "confidence": "high",
+      "why": "fade to black, 0.10 s of black ending here + 0.92 s of silence",
+      "contactSheet": "contact/cut-21.jpg"
+    },
+    {
+      "between": [
+        22,
+        23
+      ],
+      "frame": 41844,
+      "at": "00:23:14.800",
+      "confidence": "high",
+      "why": "picture cut (score 16.5) + 0.69 s of silence",
+      "contactSheet": "contact/cut-22.jpg"
+    },
+    {
+      "between": [
+        23,
+        24
+      ],
+      "frame": 43300,
+      "at": "00:24:03.333",
+      "confidence": "low",
+      "why": "picture cut (score 22.2) + 0.52 s of silence",
+      "rivals": [
+        "00:23:59.133"
+      ],
+      "contactSheet": "contact/cut-23.jpg"
+    },
+    {
+      "between": [
+        24,
+        25
+      ],
+      "frame": 45750,
+      "at": "00:25:25.000",
+      "confidence": "low",
+      "why": "picture cut (score 17.5) + 0.74 s of silence",
+      "rivals": [
+        "00:25:22.500"
+      ],
+      "contactSheet": "contact/cut-24.jpg"
+    },
+    {
+      "between": [
+        25,
+        26
+      ],
+      "frame": 47410,
+      "at": "00:26:20.333",
+      "confidence": "low",
+      "why": "picture cut (score 10.6) + 0.95 s of silence",
+      "rivals": [
+        "00:26:17.400",
+        "00:26:23.467"
+      ],
+      "contactSheet": "contact/cut-25.jpg"
+    },
+    {
+      "between": [
+        26,
+        27
+      ],
+      "frame": 49879,
+      "at": "00:27:42.633",
+      "confidence": "high",
+      "why": "picture cut (score 21.7) + 1.35 s of silence",
+      "contactSheet": "contact/cut-26.jpg"
+    },
+    {
+      "between": [
+        27,
+        28
+      ],
+      "frame": 52041,
+      "at": "00:28:54.700",
+      "confidence": "low",
+      "why": "picture cut (score 20.7) + 0.85 s of silence",
+      "rivals": [
+        "00:28:58.700"
+      ],
+      "contactSheet": "contact/cut-27.jpg"
+    },
+    {
+      "between": [
+        28,
+        29
+      ],
+      "frame": 53924,
+      "at": "00:29:57.467",
+      "confidence": "high",
+      "why": "picture cut (score 20.6) + 0.58 s of silence",
+      "contactSheet": "contact/cut-28.jpg"
+    },
+    {
+      "between": [
+        29,
+        30
+      ],
+      "frame": 55631,
+      "at": "00:30:54.367",
+      "confidence": "low",
+      "why": "picture cut (score 19.2) + 1.30 s of silence",
+      "rivals": [
+        "00:30:49.700"
+      ],
+      "contactSheet": "contact/cut-29.jpg"
+    },
+    {
+      "between": [
+        30,
+        31
+      ],
+      "frame": 57043,
+      "at": "00:31:41.433",
+      "confidence": "low",
+      "why": "picture cut (score 12.8) + 1.36 s of silence",
+      "rivals": [
+        "00:31:45.233"
+      ],
+      "contactSheet": "contact/cut-30.jpg"
+    },
+    {
+      "between": [
+        31,
+        32
+      ],
+      "frame": 59287,
+      "at": "00:32:56.233",
+      "confidence": "high",
+      "why": "picture cut (score 26.6) + 1.89 s of silence",
+      "contactSheet": "contact/cut-31.jpg"
+    },
+    {
+      "between": [
+        32,
+        33
+      ],
+      "frame": 62490,
+      "at": "00:34:43.000",
+      "confidence": "low",
+      "why": "picture cut (score 18.1) + 0.86 s of silence",
+      "rivals": [
+        "00:34:38.667",
+        "00:34:40.833"
+      ],
+      "contactSheet": "contact/cut-32.jpg"
+    },
+    {
+      "between": [
+        33,
+        34
+      ],
+      "frame": 66636,
+      "at": "00:37:01.200",
+      "confidence": "low",
+      "why": "picture cut (score 20.0) + 0.90 s of silence",
+      "rivals": [
+        "00:36:59.500"
+      ],
+      "contactSheet": "contact/cut-33.jpg"
+    },
+    {
+      "between": [
+        34,
+        35
+      ],
+      "frame": 69075,
+      "at": "00:38:22.500",
+      "confidence": "low",
+      "why": "picture cut (score 25.2) + 0.31 s of silence",
+      "contactSheet": "contact/cut-34.jpg"
+    },
+    {
+      "between": [
+        35,
+        36
+      ],
+      "frame": 71090,
+      "at": "00:39:29.667",
+      "confidence": "low",
+      "why": "picture cut (score 17.9) + 0.56 s of silence",
+      "rivals": [
+        "00:39:34.067"
+      ],
+      "contactSheet": "contact/cut-35.jpg"
+    },
+    {
+      "between": [
+        36,
+        37
+      ],
+      "frame": 72571,
+      "at": "00:40:19.033",
+      "confidence": "low",
+      "why": "picture cut (score 18.3) + 0.61 s of silence",
+      "rivals": [
+        "00:40:16.067",
+        "00:40:22.200"
+      ],
+      "contactSheet": "contact/cut-36.jpg"
+    },
+    {
+      "between": [
+        37,
+        38
+      ],
+      "frame": 75356,
+      "at": "00:41:51.867",
+      "confidence": "low",
+      "why": "picture cut (score 16.7) + 0.52 s of silence",
+      "rivals": [
+        "00:41:49.400",
+        "00:41:53.733",
+        "00:41:56.100"
+      ],
+      "contactSheet": "contact/cut-37.jpg"
+    },
+    {
+      "between": [
+        38,
+        39
+      ],
+      "frame": 76756,
+      "at": "00:42:38.533",
+      "confidence": "high",
+      "why": "picture cut (score 16.5) + 0.82 s of silence",
+      "contactSheet": "contact/cut-38.jpg"
+    },
+    {
+      "between": [
+        39,
+        40
+      ],
+      "frame": 78702,
+      "at": "00:43:43.400",
+      "confidence": "low",
+      "why": "picture cut (score 20.7) + 0.53 s of silence",
+      "rivals": [
+        "00:43:38.400"
+      ],
+      "contactSheet": "contact/cut-39.jpg"
+    },
+    {
+      "between": [
+        40,
+        41
+      ],
+      "frame": 80219,
+      "at": "00:44:33.967",
+      "confidence": "low",
+      "why": "picture cut (score 21.6) + 0.65 s of silence",
+      "rivals": [
+        "00:44:32.133"
+      ],
+      "contactSheet": "contact/cut-40.jpg"
+    },
+    {
+      "between": [
+        41,
+        42
+      ],
+      "frame": 82287,
+      "at": "00:45:42.900",
+      "confidence": "low",
+      "why": "picture cut (score 22.6) + 1.03 s of silence",
+      "rivals": [
+        "00:45:38.867",
+        "00:45:43.733",
+        "00:45:46.733"
+      ],
+      "contactSheet": "contact/cut-41.jpg"
+    },
+    {
+      "between": [
+        42,
+        43
+      ],
+      "frame": 83696,
+      "at": "00:46:29.867",
+      "confidence": "low",
+      "why": "picture cut (score 22.4) + 2.59 s of silence",
+      "rivals": [
+        "00:46:27.633",
+        "00:46:31.233",
+        "00:46:33.400"
+      ],
+      "contactSheet": "contact/cut-42.jpg"
+    },
+    {
+      "between": [
+        43,
+        44
+      ],
+      "frame": 85318,
+      "at": "00:47:23.933",
+      "confidence": "low",
+      "why": "fade to black, 0.10 s of black ending here",
+      "rivals": [
+        "00:47:25.700"
+      ],
+      "contactSheet": "contact/cut-43.jpg"
+    },
+    {
+      "between": [
+        44,
+        45
+      ],
+      "frame": 86696,
+      "at": "00:48:09.867",
+      "confidence": "low",
+      "why": "picture cut (score 23.0) + 0.73 s of silence",
+      "rivals": [
+        "00:48:06.267",
+        "00:48:14.833"
+      ],
+      "contactSheet": "contact/cut-44.jpg"
+    },
+    {
+      "between": [
+        45,
+        46
+      ],
+      "frame": 88049,
+      "at": "00:48:54.967",
+      "confidence": "low",
+      "why": "picture cut (score 17.8) + 2.25 s of silence",
+      "rivals": [
+        "00:48:49.967",
+        "00:48:52.767",
+        "00:48:56.967"
+      ],
+      "contactSheet": "contact/cut-45.jpg"
+    },
+    {
+      "between": [
+        46,
+        47
+      ],
+      "frame": 89403,
+      "at": "00:49:40.100",
+      "confidence": "low",
+      "why": "picture cut (score 18.3) + 0.81 s of silence",
+      "rivals": [
+        "00:49:43.700"
+      ],
+      "contactSheet": "contact/cut-46.jpg"
+    },
+    {
+      "between": [
+        47,
+        48
+      ],
+      "frame": 90775,
+      "at": "00:50:25.833",
+      "confidence": "low",
+      "why": "picture cut (score 18.4) + 3.73 s of silence",
+      "rivals": [
+        "00:50:23.433",
+        "00:50:30.433"
+      ],
+      "contactSheet": "contact/cut-47.jpg"
+    },
+    {
+      "between": [
+        48,
+        49
+      ],
+      "frame": 92484,
+      "at": "00:51:22.800",
+      "confidence": "low",
+      "why": "picture cut (score 22.4) + 0.75 s of silence",
+      "rivals": [
+        "00:51:26.967"
+      ],
+      "contactSheet": "contact/cut-48.jpg"
+    },
+    {
+      "between": [
+        49,
+        50
+      ],
+      "frame": 94278,
+      "at": "00:52:22.600",
+      "confidence": "low",
+      "why": "picture cut (score 22.8) + 0.55 s of silence",
+      "rivals": [
+        "00:52:26.167"
+      ],
+      "contactSheet": "contact/cut-49.jpg"
+    },
+    {
+      "between": [
+        50,
+        51
+      ],
+      "frame": 95687,
+      "at": "00:53:09.567",
+      "confidence": "low",
+      "why": "picture cut (score 19.6) + 4.16 s of silence",
+      "rivals": [
+        "00:53:06.900",
+        "00:53:13.200"
+      ],
+      "contactSheet": "contact/cut-50.jpg"
+    },
+    {
+      "between": [
+        51,
+        52
+      ],
+      "frame": 97601,
+      "at": "00:54:13.367",
+      "confidence": "low",
+      "why": "picture cut (score 18.2) + 1.32 s of silence",
+      "rivals": [
+        "00:54:11.933",
+        "00:54:15.867"
+      ],
+      "contactSheet": "contact/cut-51.jpg"
+    },
+    {
+      "between": [
+        52,
+        53
+      ],
+      "frame": 99105,
+      "at": "00:55:03.500",
+      "confidence": "low",
+      "why": "picture cut (score 16.5) + 0.85 s of silence",
+      "rivals": [
+        "00:55:06.367"
+      ],
+      "contactSheet": "contact/cut-52.jpg"
+    },
+    {
+      "between": [
+        53,
+        54
+      ],
+      "frame": 100476,
+      "at": "00:55:49.200",
+      "confidence": "low",
+      "why": "picture cut (score 16.3) + 0.57 s of silence",
+      "rivals": [
+        "00:55:44.967",
+        "00:55:52.500"
+      ],
+      "contactSheet": "contact/cut-53.jpg"
+    },
+    {
+      "between": [
+        54,
+        55
+      ],
+      "frame": 101843,
+      "at": "00:56:34.767",
+      "confidence": "low",
+      "why": "picture cut (score 17.4) + 0.52 s of silence",
+      "rivals": [
+        "00:56:37.933"
+      ],
+      "contactSheet": "contact/cut-54.jpg"
+    },
+    {
+      "between": [
+        55,
+        56
+      ],
+      "frame": 103277,
+      "at": "00:57:22.567",
+      "confidence": "high",
+      "why": "picture cut (score 19.1) + 0.93 s of silence",
+      "contactSheet": "contact/cut-55.jpg"
+    },
+    {
+      "between": [
+        56,
+        57
+      ],
+      "frame": 105710,
+      "at": "00:58:43.667",
+      "confidence": "low",
+      "why": "picture cut (score 18.8) + 0.38 s of silence",
+      "contactSheet": "contact/cut-56.jpg"
+    },
+    {
+      "between": [
+        57,
+        58
+      ],
+      "frame": 107492,
+      "at": "00:59:43.067",
+      "confidence": "low",
+      "why": "picture cut (score 10.3) + 0.34 s of silence",
+      "contactSheet": "contact/cut-57.jpg"
+    },
+    {
+      "between": [
+        58,
+        59
+      ],
+      "frame": 110547,
+      "at": "01:01:24.900",
+      "confidence": "low",
+      "why": "picture cut (score 20.1) + 1.45 s of silence",
+      "rivals": [
+        "01:01:26.400",
+        "01:01:27.833"
+      ],
+      "contactSheet": "contact/cut-58.jpg"
+    },
+    {
+      "between": [
+        59,
+        60
+      ],
+      "frame": 113148,
+      "at": "01:02:51.600",
+      "confidence": "low",
+      "why": "picture cut (score 19.8) + 2.26 s of silence",
+      "rivals": [
+        "01:02:55.000"
+      ],
+      "contactSheet": "contact/cut-59.jpg"
+    },
+    {
+      "between": [
+        60,
+        61
+      ],
+      "frame": 114938,
+      "at": "01:03:51.267",
+      "confidence": "low",
+      "why": "picture cut (score 24.1) + 2.59 s of silence",
+      "rivals": [
+        "01:03:47.900",
+        "01:03:53.533"
+      ],
+      "contactSheet": "contact/cut-60.jpg"
+    },
+    {
+      "between": [
+        61,
+        62
+      ],
+      "frame": 117108,
+      "at": "01:05:03.600",
+      "confidence": "low",
+      "why": "picture cut (score 18.7) + 0.84 s of silence",
+      "rivals": [
+        "01:05:01.500"
+      ],
+      "contactSheet": "contact/cut-61.jpg"
+    },
+    {
+      "between": [
+        62,
+        63
+      ],
+      "frame": 118561,
+      "at": "01:05:52.033",
+      "confidence": "low",
+      "why": "picture cut (score 24.7) + 2.45 s of silence",
+      "rivals": [
+        "01:05:50.367"
+      ],
+      "contactSheet": "contact/cut-62.jpg"
+    },
+    {
+      "between": [
+        63,
+        64
+      ],
+      "frame": 120804,
+      "at": "01:07:06.800",
+      "confidence": "low",
+      "why": "picture cut (score 19.5) + 1.40 s of silence",
+      "rivals": [
+        "01:07:09.167"
+      ],
+      "contactSheet": "contact/cut-63.jpg"
+    },
+    {
+      "between": [
+        64,
+        65
+      ],
+      "frame": 122697,
+      "at": "01:08:09.900",
+      "confidence": "low",
+      "why": "picture cut (score 21.3) + 1.12 s of silence",
+      "rivals": [
+        "01:08:10.900",
+        "01:08:13.800"
+      ],
+      "contactSheet": "contact/cut-64.jpg"
+    },
+    {
+      "between": [
+        65,
+        66
+      ],
+      "frame": 124505,
+      "at": "01:09:10.167",
+      "confidence": "low",
+      "why": "picture cut (score 21.0) + 0.54 s of silence",
+      "rivals": [
+        "01:09:12.367",
+        "01:09:15.033"
+      ],
+      "contactSheet": "contact/cut-65.jpg"
+    },
+    {
+      "between": [
+        66,
+        67
+      ],
+      "frame": 126900,
+      "at": "01:10:30.000",
+      "confidence": "low",
+      "why": "picture cut (score 17.9) + 0.63 s of silence",
+      "rivals": [
+        "01:10:34.567"
+      ],
+      "contactSheet": "contact/cut-66.jpg"
+    },
+    {
+      "between": [
+        67,
+        68
+      ],
+      "frame": 129998,
+      "at": "01:12:13.267",
+      "confidence": "high",
+      "why": "fade to black, 0.10 s of black ending here + 2.15 s of silence",
+      "contactSheet": "contact/cut-67.jpg"
+    },
+    {
+      "between": [
+        68,
+        69
+      ],
+      "frame": 132886,
+      "at": "01:13:49.533",
+      "confidence": "low",
+      "why": "picture cut (score 13.4) + 1.09 s of silence",
+      "rivals": [
+        "01:13:46.867",
+        "01:13:52.633",
+        "01:13:53.800"
+      ],
+      "contactSheet": "contact/cut-68.jpg"
+    },
+    {
+      "between": [
+        69,
+        70
+      ],
+      "frame": 134701,
+      "at": "01:14:50.033",
+      "confidence": "high",
+      "why": "picture cut (score 15.9) + 0.64 s of silence",
+      "contactSheet": "contact/cut-69.jpg"
+    },
+    {
+      "between": [
+        70,
+        71
+      ],
+      "frame": 136321,
+      "at": "01:15:44.033",
+      "confidence": "low",
+      "why": "picture cut (score 19.6) + 1.69 s of silence",
+      "rivals": [
+        "01:15:45.733",
+        "01:15:47.533"
+      ],
+      "contactSheet": "contact/cut-70.jpg"
+    },
+    {
+      "between": [
+        71,
+        72
+      ],
+      "frame": 139284,
+      "at": "01:17:22.800",
+      "confidence": "high",
+      "why": "fade to black, 0.07 s of black ending here",
+      "contactSheet": "contact/cut-71.jpg"
+    },
+    {
+      "between": [
+        72,
+        73
+      ],
+      "frame": 141043,
+      "at": "01:18:21.433",
+      "confidence": "low",
+      "why": "fade to black, 0.33 s of black ending here",
+      "rivals": [
+        "01:18:24.467"
+      ],
+      "contactSheet": "contact/cut-72.jpg"
+    },
+    {
+      "between": [
+        73,
+        74
+      ],
+      "frame": 143029,
+      "at": "01:19:27.633",
+      "confidence": "high",
+      "why": "picture cut (score 40.8) + 1.60 s of silence",
+      "contactSheet": "contact/cut-73.jpg"
+    },
+    {
+      "between": [
+        74,
+        75
+      ],
+      "frame": 145696,
+      "at": "01:20:56.533",
+      "confidence": "low",
+      "why": "picture cut (score 25.7) + 1.14 s of silence",
+      "rivals": [
+        "01:21:00.133"
+      ],
+      "contactSheet": "contact/cut-74.jpg"
+    },
+    {
+      "between": [
+        75,
+        76
+      ],
+      "frame": 147745,
+      "at": "01:22:04.833",
+      "confidence": "low",
+      "why": "picture cut (score 25.6) + 0.53 s of silence",
+      "rivals": [
+        "01:22:06.167"
+      ],
+      "contactSheet": "contact/cut-75.jpg"
+    },
+    {
+      "between": [
+        76,
+        77
+      ],
+      "frame": 150129,
+      "at": "01:23:24.300",
+      "confidence": "low",
+      "why": "picture cut (score 15.1) + 0.61 s of silence",
+      "rivals": [
+        "01:23:20.667"
+      ],
+      "contactSheet": "contact/cut-76.jpg"
+    },
+    {
+      "between": [
+        77,
+        78
+      ],
+      "frame": 153895,
+      "at": "01:25:29.833",
+      "confidence": "low",
+      "why": "picture cut (score 19.0) + 0.60 s of silence",
+      "rivals": [
+        "01:25:25.800"
+      ],
+      "contactSheet": "contact/cut-77.jpg"
+    },
+    {
+      "between": [
+        78,
+        79
+      ],
+      "frame": 155670,
+      "at": "01:26:29.000",
+      "confidence": "high",
+      "why": "picture cut (score 14.6) + 0.52 s of silence",
+      "contactSheet": "contact/cut-78.jpg"
+    },
+    {
+      "between": [
+        79,
+        80
+      ],
+      "frame": 157137,
+      "at": "01:27:17.900",
+      "confidence": "high",
+      "why": "picture cut (score 8.5) + 0.67 s of silence",
+      "contactSheet": "contact/cut-79.jpg"
+    },
+    {
+      "between": [
+        80,
+        81
+      ],
+      "frame": 160416,
+      "at": "01:29:07.200",
+      "confidence": "high",
+      "why": "fade to black, 0.13 s of black ending here + 0.94 s of silence",
+      "contactSheet": "contact/cut-80.jpg"
+    },
+    {
+      "between": [
+        81,
+        82
+      ],
+      "frame": 162074,
+      "at": "01:30:02.467",
+      "confidence": "low",
+      "why": "picture cut (score 11.7) + 0.76 s of silence",
+      "rivals": [
+        "01:29:59.633"
+      ],
+      "contactSheet": "contact/cut-81.jpg"
+    },
+    {
+      "between": [
+        82,
+        83
+      ],
+      "frame": 164309,
+      "at": "01:31:16.967",
+      "confidence": "high",
+      "why": "picture cut (score 13.6) + 0.61 s of silence",
+      "contactSheet": "contact/cut-82.jpg"
+    },
+    {
+      "between": [
+        83,
+        84
+      ],
+      "frame": 166006,
+      "at": "01:32:13.533",
+      "confidence": "high",
+      "why": "fade to black, 0.10 s of black ending here + 0.46 s of silence",
+      "contactSheet": "contact/cut-83.jpg"
+    },
+    {
+      "between": [
+        84,
+        85
+      ],
+      "frame": 167683,
+      "at": "01:33:09.433",
+      "confidence": "high",
+      "why": "picture cut (score 14.6) + 0.65 s of silence",
+      "contactSheet": "contact/cut-84.jpg"
+    },
+    {
+      "between": [
+        85,
+        86
+      ],
+      "frame": 170043,
+      "at": "01:34:28.100",
+      "confidence": "low",
+      "why": "picture cut (score 12.6) + 0.50 s of silence",
+      "rivals": [
+        "01:34:32.767"
+      ],
+      "contactSheet": "contact/cut-85.jpg"
+    },
+    {
+      "between": [
+        86,
+        87
+      ],
+      "frame": 171462,
+      "at": "01:35:15.400",
+      "confidence": "low",
+      "why": "picture cut (score 10.6) + 2.30 s of silence",
+      "rivals": [
+        "01:35:11.567"
+      ],
+      "contactSheet": "contact/cut-86.jpg"
+    },
+    {
+      "between": [
+        87,
+        88
+      ],
+      "frame": 173511,
+      "at": "01:36:23.700",
+      "confidence": "low",
+      "why": "picture cut (score 9.5) + 1.41 s of silence",
+      "rivals": [
+        "01:36:22.367"
+      ],
+      "contactSheet": "contact/cut-87.jpg"
+    },
+    {
+      "between": [
+        88,
+        89
+      ],
+      "frame": 174910,
+      "at": "01:37:10.333",
+      "confidence": "low",
+      "why": "picture cut (score 8.4) + 2.24 s of silence",
+      "rivals": [
+        "01:37:07.733",
+        "01:37:09.833",
+        "01:37:13.667"
+      ],
+      "contactSheet": "contact/cut-88.jpg"
+    },
+    {
+      "between": [
+        89,
+        90
+      ],
+      "frame": 176301,
+      "at": "01:37:56.700",
+      "confidence": "high",
+      "why": "picture cut (score 20.7) + 0.67 s of silence",
+      "contactSheet": "contact/cut-89.jpg"
+    },
+    {
+      "between": [
+        90,
+        91
+      ],
+      "frame": 177936,
+      "at": "01:38:51.200",
+      "confidence": "low",
+      "why": "picture cut (score 20.9) + 1.22 s of silence",
+      "rivals": [
+        "01:38:48.067",
+        "01:38:53.867",
+        "01:38:56.000"
+      ],
+      "contactSheet": "contact/cut-90.jpg"
+    },
+    {
+      "between": [
+        91,
+        92
+      ],
+      "frame": 179585,
+      "at": "01:39:46.167",
+      "confidence": "high",
+      "why": "fade to black, 0.07 s of black ending here",
+      "contactSheet": "contact/cut-91.jpg"
+    },
+    {
+      "between": [
+        92,
+        93
+      ],
+      "frame": 181544,
+      "at": "01:40:51.467",
+      "confidence": "low",
+      "why": "picture cut (score 21.1) + 0.50 s of silence",
+      "contactSheet": "contact/cut-92.jpg"
+    },
+    {
+      "between": [
+        93,
+        94
+      ],
+      "frame": 183653,
+      "at": "01:42:01.767",
+      "confidence": "low",
+      "why": "picture cut (score 16.3) + 0.46 s of silence",
+      "contactSheet": "contact/cut-93.jpg"
+    },
+    {
+      "between": [
+        94,
+        95
+      ],
+      "frame": 186145,
+      "at": "01:43:24.833",
+      "confidence": "high",
+      "why": "picture cut (score 23.4) + 0.96 s of silence",
+      "contactSheet": "contact/cut-94.jpg"
+    },
+    {
+      "between": [
+        95,
+        96
+      ],
+      "frame": 187764,
+      "at": "01:44:18.800",
+      "confidence": "low",
+      "why": "picture cut (score 26.5) + 0.48 s of silence",
+      "contactSheet": "contact/cut-95.jpg"
+    },
+    {
+      "between": [
+        96,
+        97
+      ],
+      "frame": 192183,
+      "at": "01:46:46.100",
+      "confidence": "low",
+      "why": "picture cut (score 19.9) + 1.76 s of silence",
+      "rivals": [
+        "01:46:48.567"
+      ],
+      "contactSheet": "contact/cut-96.jpg"
+    },
+    {
+      "between": [
+        97,
+        98
+      ],
+      "frame": 194033,
+      "at": "01:47:47.767",
+      "confidence": "high",
+      "why": "picture cut (score 11.9) + 1.29 s of silence",
+      "contactSheet": "contact/cut-97.jpg"
+    },
+    {
+      "between": [
+        98,
+        99
+      ],
+      "frame": 196828,
+      "at": "01:49:20.933",
+      "confidence": "low",
+      "why": "picture cut (score 15.1) + 0.42 s of silence",
+      "contactSheet": "contact/cut-98.jpg"
+    }
+  ],
+  "expectedEpisodes": 99,
+  "notes": [],
+  "splitVersion": 1
+}
