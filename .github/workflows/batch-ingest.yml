@@ -109,6 +109,12 @@ jobs:
               processed=$((processed + 1))
             else
               echo "Warning: Ingest for $slug failed or was refused. Moving to next link..."
+              grep -v -F "$url" links.txt > links.txt.tmp && mv links.txt.tmp links.txt
+              echo "$url" >> failed_links.txt
+              git add links.txt failed_links.txt
+              git commit -m "chore: move failed link $slug to failed_links.txt [skip ci]" || true
+              git pull --rebase origin "${{ github.ref_name }}" || true
+              git push origin "${{ github.ref_name }}" || true
             fi
             
             # We process maximum 5 links per GitHub run to avoid 6-hour timeout
@@ -126,13 +132,10 @@ jobs:
             fi
           done < links.txt
           
-          if [ "$processed" -gt 0 ] && [ ${#remaining_urls[@]} -gt 0 ]; then
-            echo "Processed $processed series this run. There are still ${#remaining_urls[@]} URLs remaining in links.txt."
+          if [ ${#remaining_urls[@]} -gt 0 ]; then
+            echo "Processed $processed successful series this run. There are still ${#remaining_urls[@]} URLs remaining in links.txt."
             echo "Triggering next batch run automatically..."
             gh workflow run batch-ingest.yml --ref "${{ github.ref_name }}" || true
-          elif [ ${#remaining_urls[@]} -eq 0 ]; then
-            echo "All URLs in links.txt have been processed!"
           else
-            echo "No URLs were processed in this run ($processed successful). Halting to prevent infinite loop. Check logs for errors."
-            exit 1
+            echo "All URLs in links.txt have been processed!"
           fi
