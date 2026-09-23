@@ -5,7 +5,9 @@
  */
 import type { SeriesManifest } from "../../content/seriesManifest";
 import { SIGNAL_NIGHT_MANIFEST } from "./signal-night";
+import { YT_WXOIIBQYLZA_MANIFEST } from "./yt-wxoiibqylza";
 
 export const SERIES_MANIFESTS: SeriesManifest[] = [
   SIGNAL_NIGHT_MANIFEST,
+  YT_WXOIIBQYLZA_MANIFEST,
 ];
