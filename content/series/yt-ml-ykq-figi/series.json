@@ -31,5 +31,101 @@
     "grantedOn": "2026-09-23",
     "source": "Automated end-to-end pipeline confirmation"
   },
-  "episodes": []
+  "episodes": [
+    {
+      "episodeNumber": 1,
+      "master": "masters/episode-1.mp4",
+      "title": "Episode 1"
+    },
+    {
+      "episodeNumber": 2,
+      "master": "masters/episode-2.mp4",
+      "title": "Episode 2"
+    },
+    {
+      "episodeNumber": 3,
+      "master": "masters/episode-3.mp4",
+      "title": "Episode 3"
+    },
+    {
+      "episodeNumber": 4,
+      "master": "masters/episode-4.mp4",
+      "title": "Episode 4"
+    },
+    {
+      "episodeNumber": 5,
+      "master": "masters/episode-5.mp4",
+      "title": "Episode 5"
+    },
+    {
+      "episodeNumber": 6,
+      "master": "masters/episode-6.mp4",
+      "title": "Episode 6"
+    },
+    {
+      "episodeNumber": 7,
+      "master": "masters/episode-7.mp4",
+      "title": "Episode 7"
+    },
+    {
+      "episodeNumber": 8,
+      "master": "masters/episode-8.mp4",
+      "title": "Episode 8"
+    },
+    {
+      "episodeNumber": 9,
+      "master": "masters/episode-9.mp4",
+      "title": "Episode 9"
+    },
+    {
+      "episodeNumber": 10,
+      "master": "masters/episode-10.mp4",
+      "title": "Episode 10"
+    },
+    {
+      "episodeNumber": 11,
+      "master": "masters/episode-11.mp4",
+      "title": "Episode 11"
+    },
+    {
+      "episodeNumber": 12,
+      "master": "masters/episode-12.mp4",
+      "title": "Episode 12"
+    },
+    {
+      "episodeNumber": 13,
+      "master": "masters/episode-13.mp4",
+      "title": "Episode 13"
+    },
+    {
+      "episodeNumber": 14,
+      "master": "masters/episode-14.mp4",
+      "title": "Episode 14"
+    },
+    {
+      "episodeNumber": 15,
+      "master": "masters/episode-15.mp4",
+      "title": "Episode 15"
+    },
+    {
+      "episodeNumber": 16,
+      "master": "masters/episode-16.mp4",
+      "title": "Episode 16"
+    },
+    {
+      "episodeNumber": 17,
+      "master": "masters/episode-17.mp4",
+      "title": "Episode 17"
+    },
+    {
+      "episodeNumber": 18,
+      "master": "masters/episode-18.mp4",
+      "title": "Episode 18"
+    },
+    {
+      "episodeNumber": 19,
+      "master": "masters/episode-19.mp4",
+      "title": "Episode 19"
+    }
+  ]
 }
