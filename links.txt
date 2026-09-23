@@ -1,3 +1,2 @@
 # Source URLs for media ingest (one per line)
-https://youtu.be/Ml-ykQ-fiGI?si=eLDWyqVdt_3faYgs
 https://youtu.be/TvvXi8C3-cE?si=UMu_wyA7AyscHTR2
