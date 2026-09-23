@@ -1,0 +1,15 @@
+{
+  "splitVersion": 1,
+  "identity": "371ff4e5fd7eaf92bf9ff8fc6a4e74dedfaf7480312c96273f859a9de1065b5b",
+  "source": {
+    "file": "delivery.mp4",
+    "sha256": "03142ff962351f9bc1e2fac8c6c8bc75a023cfa475c3ded00ea626cbfefd1500"
+  },
+  "startFrame": 114046,
+  "endFrame": 115165,
+  "frameRate": "24/1",
+  "start": "01:19:11.917",
+  "end": "01:19:58.542",
+  "cropped": null,
+  "masterSha256": null
+}
