@@ -31,5 +31,206 @@
     "grantedOn": "2026-09-23",
     "source": "Automated end-to-end pipeline confirmation"
   },
-  "episodes": []
+  "episodes": [
+    {
+      "episodeNumber": 1,
+      "master": "masters/episode-1.mp4",
+      "title": "Episode 1"
+    },
+    {
+      "episodeNumber": 2,
+      "master": "masters/episode-2.mp4",
+      "title": "Episode 2"
+    },
+    {
+      "episodeNumber": 3,
+      "master": "masters/episode-3.mp4",
+      "title": "Episode 3"
+    },
+    {
+      "episodeNumber": 4,
+      "master": "masters/episode-4.mp4",
+      "title": "Episode 4"
+    },
+    {
+      "episodeNumber": 5,
+      "master": "masters/episode-5.mp4",
+      "title": "Episode 5"
+    },
+    {
+      "episodeNumber": 6,
+      "master": "masters/episode-6.mp4",
+      "title": "Episode 6"
+    },
+    {
+      "episodeNumber": 7,
+      "master": "masters/episode-7.mp4",
+      "title": "Episode 7"
+    },
+    {
+      "episodeNumber": 8,
+      "master": "masters/episode-8.mp4",
+      "title": "Episode 8"
+    },
+    {
+      "episodeNumber": 9,
+      "master": "masters/episode-9.mp4",
+      "title": "Episode 9"
+    },
+    {
+      "episodeNumber": 10,
+      "master": "masters/episode-10.mp4",
+      "title": "Episode 10"
+    },
+    {
+      "episodeNumber": 11,
+      "master": "masters/episode-11.mp4",
+      "title": "Episode 11"
+    },
+    {
+      "episodeNumber": 12,
+      "master": "masters/episode-12.mp4",
+      "title": "Episode 12"
+    },
+    {
+      "episodeNumber": 13,
+      "master": "masters/episode-13.mp4",
+      "title": "Episode 13"
+    },
+    {
+      "episodeNumber": 14,
+      "master": "masters/episode-14.mp4",
+      "title": "Episode 14"
+    },
+    {
+      "episodeNumber": 15,
+      "master": "masters/episode-15.mp4",
+      "title": "Episode 15"
+    },
+    {
+      "episodeNumber": 16,
+      "master": "masters/episode-16.mp4",
+      "title": "Episode 16"
+    },
+    {
+      "episodeNumber": 17,
+      "master": "masters/episode-17.mp4",
+      "title": "Episode 17"
+    },
+    {
+      "episodeNumber": 18,
+      "master": "masters/episode-18.mp4",
+      "title": "Episode 18"
+    },
+    {
+      "episodeNumber": 19,
+      "master": "masters/episode-19.mp4",
+      "title": "Episode 19"
+    },
+    {
+      "episodeNumber": 20,
+      "master": "masters/episode-20.mp4",
+      "title": "Episode 20"
+    },
+    {
+      "episodeNumber": 21,
+      "master": "masters/episode-21.mp4",
+      "title": "Episode 21"
+    },
+    {
+      "episodeNumber": 22,
+      "master": "masters/episode-22.mp4",
+      "title": "Episode 22"
+    },
+    {
+      "episodeNumber": 23,
+      "master": "masters/episode-23.mp4",
+      "title": "Episode 23"
+    },
+    {
+      "episodeNumber": 24,
+      "master": "masters/episode-24.mp4",
+      "title": "Episode 24"
+    },
+    {
+      "episodeNumber": 25,
+      "master": "masters/episode-25.mp4",
+      "title": "Episode 25"
+    },
+    {
+      "episodeNumber": 26,
+      "master": "masters/episode-26.mp4",
+      "title": "Episode 26"
+    },
+    {
+      "episodeNumber": 27,
+      "master": "masters/episode-27.mp4",
+      "title": "Episode 27"
+    },
+    {
+      "episodeNumber": 28,
+      "master": "masters/episode-28.mp4",
+      "title": "Episode 28"
+    },
+    {
+      "episodeNumber": 29,
+      "master": "masters/episode-29.mp4",
+      "title": "Episode 29"
+    },
+    {
+      "episodeNumber": 30,
+      "master": "masters/episode-30.mp4",
+      "title": "Episode 30"
+    },
+    {
+      "episodeNumber": 31,
+      "master": "masters/episode-31.mp4",
+      "title": "Episode 31"
+    },
+    {
+      "episodeNumber": 32,
+      "master": "masters/episode-32.mp4",
+      "title": "Episode 32"
+    },
+    {
+      "episodeNumber": 33,
+      "master": "masters/episode-33.mp4",
+      "title": "Episode 33"
+    },
+    {
+      "episodeNumber": 34,
+      "master": "masters/episode-34.mp4",
+      "title": "Episode 34"
+    },
+    {
+      "episodeNumber": 35,
+      "master": "masters/episode-35.mp4",
+      "title": "Episode 35"
+    },
+    {
+      "episodeNumber": 36,
+      "master": "masters/episode-36.mp4",
+      "title": "Episode 36"
+    },
+    {
+      "episodeNumber": 37,
+      "master": "masters/episode-37.mp4",
+      "title": "Episode 37"
+    },
+    {
+      "episodeNumber": 38,
+      "master": "masters/episode-38.mp4",
+      "title": "Episode 38"
+    },
+    {
+      "episodeNumber": 39,
+      "master": "masters/episode-39.mp4",
+      "title": "Episode 39"
+    },
+    {
+      "episodeNumber": 40,
+      "master": "masters/episode-40.mp4",
+      "title": "Episode 40"
+    }
+  ]
 }
