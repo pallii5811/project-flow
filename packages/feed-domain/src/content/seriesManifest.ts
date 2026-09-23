@@ -67,6 +67,14 @@ export type SeriesManifest = {
   producerId: string;
   producerOfRecord: string;
   socialClipsAllowed: boolean;
+  /**
+   * Where the written OK to post clips is, when there is one. Clipping a work
+   * publishes a piece of it on somebody else's platform, so the licence has to
+   * say it may be done — the same shape `splitPermission` takes before a file
+   * is cut. It stays in the manifest and never reaches the browser: only
+   * `scripts/make-clips.mjs` reads it.
+   */
+  socialClipsPermission?: { grantedOn: string; source: string } | null;
   rights: SeriesRights;
   /** ISO-8601 instant the pack was ingested. */
   packagedAt: string;

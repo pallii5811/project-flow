@@ -35,7 +35,11 @@ export const SIGNAL_NIGHT_MANIFEST: SeriesManifest = {
   },
   "producerId": "prod_standin_inhouse",
   "producerOfRecord": "PROJECT FLOW — cleared stand-in pack, not a licensed title",
-  "socialClipsAllowed": false,
+  "socialClipsAllowed": true,
+  "socialClipsPermission": {
+    "grantedOn": "2026-09-24",
+    "source": "the pack is ours: generated in this repository by scripts/make-standin-masters.mjs, producer of record PROJECT FLOW. Clips of it must carry the stand-in label so nobody mistakes it for a licensed drama."
+  },
   "rights": {
     "territories": [
       "WORLD"
@@ -47,7 +51,7 @@ export const SIGNAL_NIGHT_MANIFEST: SeriesManifest = {
     "windowStart": "2026-01-01T00:00:00.000Z",
     "windowEnd": null
   },
-  "packagedAt": "2026-09-18T02:56:23.258Z",
+  "packagedAt": "2026-09-23T22:13:34.164Z",
   "gateVersion": 3,
   "episodes": [
     {

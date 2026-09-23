@@ -67,6 +67,20 @@ describe("the catalog is built from the manifests", () => {
       expect(typeof series.socialClipsAllowed).toBe("boolean");
     }
   });
+
+  it("the written clip permission stays in the build, like the producer of record", () => {
+    // Where a studio said clips may be posted — an email, a contract clause —
+    // is a commercial fact. `scripts/make-clips.mjs` reads it from the
+    // manifest; the catalog the browser is built from must never carry it.
+    const manifest: SeriesManifest = {
+      ...signalNight,
+      socialClipsAllowed: true,
+      socialClipsPermission: { grantedOn: "2026-09-24", source: "email from prod_secret_studio" },
+    };
+    const json = JSON.stringify(catalogFromManifests([manifest]));
+    expect(json).not.toContain("socialClipsPermission");
+    expect(json).not.toContain("prod_secret_studio");
+  });
 });
 
 describe("rights windows", () => {

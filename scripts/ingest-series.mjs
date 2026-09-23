@@ -81,6 +81,7 @@ import {
   parseVttCues,
   srtToVtt,
 } from "./lib/vtt.mjs";
+import { checkClipPermission } from "./lib/clip-rules.mjs";
 import { checkDuplicateSource, formatIssues } from "./lib/media-gate.mjs";
 import {
   checkCaptionLicence,
@@ -419,6 +420,10 @@ function readDelivery(slug) {
   }
   if (typeof delivery.socialClipsAllowed !== "boolean") {
     problems.push("socialClipsAllowed must be declared true or false (CP-6)");
+  } else if (delivery.socialClipsAllowed === true) {
+    // Saying clips are allowed is a rights claim, so it is checked here, where
+    // a refusal costs nothing — not in make-clips, after a day of encoding.
+    for (const entry of checkClipPermission(delivery)) problems.push(entry.message);
   }
   const rights = delivery.rights ?? {};
   if (!isStringArray(rights.territories)) problems.push("rights.territories is required (F8)");
@@ -558,6 +563,12 @@ function seriesManifest(slug, delivery, episodes) {
     producerId: delivery.producerId,
     producerOfRecord: delivery.producerOfRecord,
     socialClipsAllowed: delivery.socialClipsAllowed,
+    socialClipsPermission: delivery.socialClipsAllowed === true
+      ? {
+          grantedOn: delivery.socialClipsPermission.grantedOn,
+          source: delivery.socialClipsPermission.source,
+        }
+      : null,
     rights: {
       territories: delivery.rights.territories,
       languages: delivery.rights.languages,

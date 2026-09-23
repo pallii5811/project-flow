@@ -66,8 +66,21 @@ Per series, in `content/series/<slug>/`:
 - `episodeSlug` is optional (`episode-N` by default). When set it must be lowercase letters
   and digits joined by single hyphens, and unique in the series: it becomes a folder that
   ingest writes and replaces.
-- `socialClipsAllowed` must be `true` or `false`, never left out. Clips do not exist yet;
-  the answer is recorded before anything is built, and the default is no.
+- `socialClipsAllowed` must be `true` or `false`, never left out, and the default is no.
+  `true` also requires `socialClipsPermission`, the same shape as `splitPermission`:
+
+  ```json
+  "socialClipsAllowed": true,
+  "socialClipsPermission": {
+    "grantedOn": "2026-09-24",
+    "source": "email from the studio, 24 Sep 2026: 'you may post clips of up to 60 seconds'"
+  }
+  ```
+
+  Without both, `npm run clips` refuses and nothing is cut — and so does ingest, where a
+  refusal costs nothing. Posting a piece of somebody's film under our name on TikTok is a
+  use of their work: the date and where they said yes are what settles an argument later.
+  See `docs/clips.md`.
 - `audioStream` is only needed when a master carries several audio streams. Without it the
   gate refuses to guess, because the second stream is usually music and effects.
 - `episodeDurationMs` narrows the default range (30 s – 180 s) for a series that is
@@ -227,6 +240,7 @@ do, by reason:
 | `drifts_past_the_end`, `stops_too_early` | The file is for another cut or another frame rate. Ask for the one that matches the delivered master |
 | `too_many_bytes`            | The master is unusually noisy; ask for a cleaner grade, or the ladder needs a decision |
 | `split_not_allowed`, `split_permission_*` | The licence does not say the file may be cut into episodes: get the studio's written OK, then fill `splitAllowed` and `splitPermission` (§1) |
+| `clips_not_allowed`, `clip_permission_*` | The delivery says clips may be posted without recording where the studio said so: fill `socialClipsPermission`, or set `socialClipsAllowed` back to `false` (§1, `docs/clips.md`) |
 | `cuts_not_confirmed`        | Nobody checked the contact sheets yet (§7)                                   |
 | `cuts_other_file`, `cuts_label`, `cuts_count`, `cuts_length` | The cuts file does not match the delivered file, or was half edited: §7 |
 | `master_provenance_mismatch` | A master was replaced by hand next to the provenance of a split: cut it again |

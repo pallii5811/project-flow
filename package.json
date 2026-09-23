@@ -29,9 +29,11 @@
     "ingest": "node scripts/ingest-series.mjs",
     "ingest:cloud": "node scripts/cloud-ingest.mjs",
     "split": "node scripts/split-compilation.mjs",
+    "clips": "node scripts/make-clips.mjs",
     "check:ffmpeg": "node scripts/check-ffmpeg.mjs",
     "proof:gate": "node scripts/gate-proof.mjs",
     "proof:split": "node scripts/split-proof.mjs",
+    "proof:clips": "node scripts/clips-proof.mjs",
     "proof:cloud": "node scripts/cloud-proof.mjs"
   },
   "engines": {

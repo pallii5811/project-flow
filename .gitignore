@@ -37,6 +37,9 @@ Thumbs.db
 # Compilation splitter proposals and deliveries downloaded on a runner
 .split-work/
 .delivery/
+# Social clips: the videos, the frames, and clips.json — which IS the memory of
+# what was already cut, so deleting a series' folder is how you ask for it again
+clips/
 
 # Logs / temp
 *.log

@@ -22,11 +22,18 @@ jobs:
       # real endings accepted, a refused re-delivery proven to leave the
       # published series byte for byte as it was, and the media store path
       # (upload, skip, resume, a wrong key) against a local stand-in for R2.
+      # fonts-dejavu-core is for the clips: their text is drawn by libass with a
+      # font from the machine, and a runner with no font at all would fail
+      # late and look like a clip problem (docs/clips.md, "What this cannot do").
       - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core
       - run: npm run proof:gate
       # A compilation with known boundaries: every cut the splitter can see, to
       # the frame, and the ones it cannot marked as such (docs/content-operations.md §7).
       - run: npm run proof:split
       # The cloud path end to end: a link, a media store, the whole run twice.
       - run: npm run proof:cloud
+      # Social clips on files whose truth is known to the frame: the moment
+      # where the rules say, the refusals by name, and everything claimed about
+      # a rendered clip measured on it (docs/clips.md §8).
+      - run: npm run proof:clips

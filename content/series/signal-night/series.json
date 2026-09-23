@@ -7,7 +7,11 @@
   "defaultLocale": "en",
   "producerId": "prod_standin_inhouse",
   "producerOfRecord": "PROJECT FLOW — cleared stand-in pack, not a licensed title",
-  "socialClipsAllowed": false,
+  "socialClipsAllowed": true,
+  "socialClipsPermission": {
+    "grantedOn": "2026-09-24",
+    "source": "the pack is ours: generated in this repository by scripts/make-standin-masters.mjs, producer of record PROJECT FLOW. Clips of it must carry the stand-in label so nobody mistakes it for a licensed drama."
+  },
   "allowBelow1080p": true,
   "episodeDurationMs": { "min": 8000, "max": 15000 },
   "genres": ["thriller", "drama"],
