@@ -7,6 +7,7 @@ import type { SeriesManifest } from "../../content/seriesManifest";
 import { SIGNAL_NIGHT_MANIFEST } from "./signal-night";
 import { YT_2VOOAASY4O_MANIFEST } from "./yt-2vooaasy4o";
 import { YT_EI28RAQMGKO_MANIFEST } from "./yt-ei28raqmgko";
+import { YT_FAVKUQX6LQO_MANIFEST } from "./yt-favkuqx6lqo";
 import { YT_WNDIGL5OBDM_MANIFEST } from "./yt-wndigl5obdm";
 import { YT_WXOIIBQYLZA_MANIFEST } from "./yt-wxoiibqylza";
 import { YT_XXRI_5H66RW_MANIFEST } from "./yt-xxri-5h66rw";
@@ -15,6 +16,7 @@ export const SERIES_MANIFESTS: SeriesManifest[] = [
   SIGNAL_NIGHT_MANIFEST,
   YT_2VOOAASY4O_MANIFEST,
   YT_EI28RAQMGKO_MANIFEST,
+  YT_FAVKUQX6LQO_MANIFEST,
   YT_WNDIGL5OBDM_MANIFEST,
   YT_WXOIIBQYLZA_MANIFEST,
   YT_XXRI_5H66RW_MANIFEST,
