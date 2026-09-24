@@ -11,7 +11,17 @@
  *   pngSize(rel) {width, height} of a PNG, or null
  */
 import { headersFor, parseHeadersFile } from "./pages-headers.mjs";
-import { IMMUTABLE, metaScriptPolicy, scriptPolicyFor } from "./platform.mjs";
+import {
+  ALWAYS_NOINDEX,
+  IMMUTABLE,
+  indexableRoutes,
+  metaScriptPolicy,
+  routeOf,
+  scriptPolicyFor,
+} from "./platform.mjs";
+
+// Re-exported: test/platform.test.ts and the export check read it from here.
+export { routeOf };
 
 function meta(html, key) {
   const pattern = new RegExp(`<meta[^>]+(?:property|name)="${key}"[^>]+content="([^"]*)"`, "g");
@@ -29,15 +39,6 @@ function decode(text) {
     .replace(/&#x27;/g, "'")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">");
-}
-
-/** Pages the platform itself owns: never search results, whatever the switch. */
-const ALWAYS_NOINDEX = new Set(["404.html", "offline.html", "offline-shell.html"]);
-
-/** "watch/s/episode-1.html" → "/watch/s/episode-1". */
-export function routeOf(rel) {
-  const path = rel.split("\\").join("/").replace(/\.html$/, "");
-  return path === "index" ? "/" : `/${path}`;
 }
 
 /** Paths whose Cache-Control the export must get right, and what it must be. */
@@ -140,9 +141,10 @@ export function platformProblems({
     if (sitemap === null) fail("FLOW_PUBLIC=1 but the export has no sitemap.xml");
     else {
       const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => decode(match[1]));
-      const expected = [...pages.keys()]
-        .filter((rel) => rel === "index.html" || rel.split("\\").join("/").startsWith("watch/"))
-        .map((rel) => `${site}${routeOf(rel)}`);
+      // Every page that is not noindex by nature, the same list the writer
+      // built (platform.mjs): a series page nobody can find is a page we did
+      // not build.
+      const expected = indexableRoutes([...pages.keys()]).map((route) => `${site}${route}`);
       const missing = expected.filter((url) => !locs.includes(url));
       const extra = locs.filter((url) => !expected.includes(url));
       if (missing.length > 0) fail(`sitemap.xml misses ${missing.length} page(s): ${missing.slice(0, 3).join(", ")}`);

@@ -67,13 +67,15 @@ import { displayMode } from "@/features/platform/installRules";
 import { useInstallOffer } from "@/features/platform/useInstallOffer";
 
 import { episodeAnnouncement, intentConfirmation, shouldAnnounceEpisode } from "./a11y";
+import { FREE_FOREVER_LINE } from "@/lib/promise";
+
+import type { RetentionRuntime, RetentionView } from "@/features/retention/RetentionLayer";
+
 import { ContinueStrip, UpNextLabel } from "./ContinueStrip";
 import type { FeedItemHandlers } from "./FeedItemView";
 import { FeedScroller } from "./FeedScroller";
 import { FeedStage } from "./FeedStage";
-import { IntentSheet } from "./IntentSheet";
 import { NoticePill, type Notice } from "./NoticePill";
-import { SeriesEnd } from "./SeriesEnd";
 import {
   CAPTIONS_PREFERENCE_KEY,
   SOUND_CUE_SESSION_KEY,
@@ -114,6 +116,64 @@ export const FEED_CATALOG_URL = "/catalog/feed.json";
  * autoplay or a playback error schedules the page immediately instead.
  */
 const CATALOG_FALLBACK_DELAY_MS = 20_000;
+
+/**
+ * "Free forever. No coins, no unlocks." is said once on this device, at the
+ * first swipe — the moment the viewer chooses a second episode, which is
+ * where the apps they know start asking for money. Never at the cold open
+ * (nothing may stand between a link and a picture), never twice.
+ */
+const FREE_FOREVER_KEY = "project-flow.free-forever.v1";
+
+/**
+ * The lazily loaded retention chunk (features/retention/RetentionLayer.tsx):
+ * follow, like, what was watched and the news line, fetched after the first
+ * frame. Only its types are named here, which cost the feed nothing.
+ */
+type RetentionModule = typeof import("@/features/retention/RetentionLayer");
+type LoadedRetention = { mod: RetentionModule; runtime: RetentionRuntime };
+/**
+ * Surfaces that are never on screen before a first frame — the end of a
+ * series, the Tune sheet — are not loaded before one either: they come at the
+ * retention chunk's idle moment, or at once when asked for sooner. Together
+ * with the retention chunk they keep the feed's first-load JavaScript from
+ * growing with this batch (docs/decisions.md, batch 8).
+ */
+const loadSeriesEnd = () => import("./SeriesEnd");
+const loadIntentSheet = () => import("./IntentSheet");
+
+/** A module fetched late: null until it is in, and one fetch however often asked. */
+function useLateModule<T>(load: () => Promise<T>): { module: T | null; ensure: () => void } {
+  const [module, setModule] = useState<T | null>(null);
+  const promise = useRef<Promise<void> | null>(null);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const ensure = useCallback(() => {
+    promise.current ??= load()
+      .then((loaded) => {
+        if (alive.current) setModule(() => loaded);
+      })
+      .catch(() => {
+        // Tried again at the next ask; the feed never waits on it.
+        promise.current = null;
+      });
+  }, [load]);
+  return { module, ensure };
+}
+const NO_RETENTION: RetentionView = { following: new Set(), liked: new Set() };
+
+/** The rail answers a tap at once, before the device has recorded it. */
+function flipped(set: ReadonlySet<string>, id: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
 
 type FeedAppProps = {
   /** Target episode and the one after it, inlined in the page. */
@@ -159,6 +219,8 @@ const NOTICE_MS: Record<Notice["kind"], number> = {
   // Long enough to select the link by hand.
   share_failed: 6_000,
   intent: 2_400,
+  // One sentence, read once, while an episode keeps playing behind it.
+  free_forever: 4_500,
 };
 /** A held notice checks again this often whether the viewer is done with it. */
 const NOTICE_HOLD_RECHECK_MS = 1_000;
@@ -198,6 +260,10 @@ function episodeCountOf(catalog: FeedCatalog, item: ContentItem): number | null 
   return (
     catalog.series.find((series) => series.id === item.seriesId)?.totalEpisodes ?? null
   );
+}
+
+function seriesSlugOf(catalog: FeedCatalog, seriesId: string): string | null {
+  return catalog.series.find((series) => series.id === seriesId)?.seriesSlug ?? null;
 }
 
 function hashSeed(input: string): number {
@@ -264,10 +330,30 @@ export function FeedApp({
   /** When that first frame came, so a late cue never interrupts (R3A-02). */
   const framedAtRef = useRef<{ contentId: string; at: number } | null>(null);
   const soundCueShown = useRef(false);
+  /** The free-forever line was already said on this device (FREE_FOREVER_KEY). */
+  const freeForeverShown = useRef(false);
+  /** Whether anything owns the screen right now, readable from an event. */
+  const cueBlockedRef = useRef(false);
   /** `?t=` of a shared link, applied to the landing episode only (OPP-02). */
   const shareStartMs = useRef<number | null>(null);
-  const [likedIds, setLikedIds] = useState<Set<string>>(() => new Set());
-  const [followingIds, setFollowingIds] = useState<Set<string>>(() => new Set());
+  /**
+   * Follow and like, kept on this device (retentionState.ts). Empty until the
+   * retention chunk is in, which is after the first frame (ensureRetention):
+   * the rail drawing its follow state a moment late costs nothing, the first
+   * frame paying for it cost 108 ms on a throttled phone.
+   */
+  const [retention, setRetentionView] = useState<RetentionView>(NO_RETENTION);
+  const likedIds = retention.liked;
+  const followingIds = retention.following;
+  const [retentionLoaded, setRetentionLoaded] = useState<LoadedRetention | null>(null);
+  const retentionRef = useRef<LoadedRetention | null>(null);
+  const retentionPromise = useRef<Promise<LoadedRetention | null> | null>(null);
+  const seriesEnd = useLateModule(loadSeriesEnd);
+  const intentSheet = useLateModule(loadIntentSheet);
+  const ensureSeriesEnd = seriesEnd.ensure;
+  const ensureIntentSheet = intentSheet.ensure;
+  /** The "new since you were here" strip is on screen, over the title block. */
+  const [newsCovering, setNewsCovering] = useState(false);
   const [progressStore] = useState(createProgressStore);
   const [seekToMs, setSeekToMs] = useState<number | null>(null);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
@@ -433,13 +519,57 @@ export function FeedApp({
     return pagePromise.current;
   }, [loadCatalog, recommendationFor, sessionId]);
 
+  /**
+   * The retention chunk (follow, like, what was watched, the news line),
+   * fetched once — at scheduleFeedPage's idle moment after the first frame, or
+   * at the first tap on Follow or Like if that comes sooner. A failed fetch is
+   * tried again at the next trigger; the feed never waits for it.
+   */
+  const ensureRetention = useCallback((): Promise<LoadedRetention | null> => {
+    retentionPromise.current ??= import("@/features/retention/RetentionLayer")
+      .then((mod) => {
+        const loaded: LoadedRetention = { mod, runtime: mod.createRetentionRuntime() };
+        retentionRef.current = loaded;
+        if (mountedRef.current) {
+          setRetentionLoaded(loaded);
+          setRetentionView(mod.viewOf(loaded.runtime.state()));
+        }
+        return loaded;
+      })
+      .catch(() => {
+        retentionPromise.current = null;
+        return null;
+      });
+    return retentionPromise.current;
+  }, []);
+
+  const retentionScheduled = useRef(false);
   const scheduleFeedPage = useCallback(() => {
+    // Same moment, same rule as the catalog: after the first frame (or a
+    // refused autoplay, an error, the fallback), when the thread is free. On
+    // its own guard: the page can already be building from another path.
+    if (!retentionScheduled.current) {
+      retentionScheduled.current = true;
+      whenIdle(() => {
+        void ensureRetention();
+        ensureSeriesEnd();
+        ensureIntentSheet();
+      });
+    }
     if (pagePromise.current || cancelIdleRef.current) return;
     cancelIdleRef.current = whenIdle(() => {
       cancelIdleRef.current = null;
       void ensureFeedPage();
     });
-  }, [ensureFeedPage]);
+  }, [ensureFeedPage, ensureIntentSheet, ensureRetention, ensureSeriesEnd]);
+
+  // Asked for before the idle moment: fetched at once.
+  useEffect(() => {
+    if (seriesEnded) ensureSeriesEnd();
+  }, [ensureSeriesEnd, seriesEnded]);
+  useEffect(() => {
+    if (intentOpen) ensureIntentSheet();
+  }, [ensureIntentSheet, intentOpen]);
 
   // Nothing played after a long while: build the page anyway so swiping has
   // somewhere to go.
@@ -546,7 +676,28 @@ export function FeedApp({
     const stored = parseCaptionChoice(readStored("local", CAPTIONS_PREFERENCE_KEY));
     if (stored !== null) setCaptionChoice(stored);
     soundCueShown.current = readStored("session", SOUND_CUE_SESSION_KEY) === "1";
+    freeForeverShown.current = readStored("local", FREE_FOREVER_KEY) === "1";
   }, []);
+
+  const showNotice = useCallback((next: Omit<Notice, "id">) => {
+    noticeSeq.current += 1;
+    setNotice({ ...next, id: noticeSeq.current });
+    // One slot at the top: a notice replaces the "Next episode" label instead
+    // of being drawn over it (R3A-02). The Continue strip is not in that slot.
+    setResumeOffer((offer) => (offer?.reason === "next_episode" ? null : offer));
+  }, []);
+
+  /** The layer reports every change it writes; the rail redraws from it. */
+  const onRetentionView = useCallback((view: RetentionView) => {
+    if (mountedRef.current) setRetentionView(view);
+  }, []);
+  const trackRetention = useCallback(
+    (
+      name: "new_episodes_shown" | "new_episodes_open",
+      properties: Record<string, string | number | null>,
+    ) => analytics.track(name, properties),
+    [analytics],
+  );
 
   // Resume from localStorage (non-blocking). Sound always starts off: a saved
   // unmuted preference would make the browser refuse autoplay (PB-3).
@@ -840,6 +991,21 @@ export function FeedApp({
       progressThrottle.reset();
       if (nextItems !== items) setItems(nextItems);
       setIndex(next);
+      // A viewer who swipes has chosen a second episode: the moment the apps
+      // they know start asking for money, and the only moment we say we never
+      // will. Once per device, never over anything else, never at the cold
+      // open, and never before the sound cue has had its turn.
+      if (
+        kind === "swipe" &&
+        !freeForeverShown.current &&
+        soundCueShown.current &&
+        !cueBlockedRef.current
+      ) {
+        freeForeverShown.current = true;
+        writeStored("local", FREE_FOREVER_KEY, "1");
+        showNotice({ kind: "free_forever", text: FREE_FOREVER_LINE });
+        analytics.track("free_forever_shown", { content_id: to?.id ?? null });
+      }
     },
     [
       analytics,
@@ -849,6 +1015,7 @@ export function FeedApp({
       perf,
       progressStore,
       progressThrottle,
+      showNotice,
       trackSeriesComplete,
     ],
   );
@@ -962,6 +1129,19 @@ export function FeedApp({
 
   const handleEnded = (item: ContentItem) => {
     emitWatchProgress(item, item.durationMs, item.durationMs, true);
+    // Watched to the end: the series page can say so without inferring it
+    // from a resume point (retentionState.ts).
+    const finishedAt = Date.now();
+    void ensureRetention().then((loaded) =>
+      loaded?.runtime.markWatched(
+        {
+          contentId: item.id,
+          seriesId: item.seriesId,
+          episodeNumber: item.episodeNumber,
+        },
+        finishedAt,
+      ),
+    );
     analytics.track("episode_complete", {
       content_id: item.id,
       series_id: item.seriesId,
@@ -1053,14 +1233,6 @@ export function FeedApp({
       setSeriesEnded(ending);
     })();
   };
-
-  const showNotice = useCallback((next: Omit<Notice, "id">) => {
-    noticeSeq.current += 1;
-    setNotice({ ...next, id: noticeSeq.current });
-    // One slot at the top: a notice replaces the "Next episode" label instead
-    // of being drawn over it (R3A-02). The Continue strip is not in that slot.
-    setResumeOffer((offer) => (offer?.reason === "next_episode" ? null : offer));
-  }, []);
 
   /**
    * rail: the episode on screen, at the moment shared (OPP-02).
@@ -1196,16 +1368,38 @@ export function FeedApp({
 
   // "Tap for sound", once per browser session, for the first episode that
   // plays muted with nothing else on screen (UX-02).
-  const cueBlocked =
+  /**
+   * The strip slot belongs first to what the viewer asked for: a resume offer,
+   * the end of a series, the Tune sheet, an error, the tap-to-play gate. The
+   * "new since you were here" line waits for all of them.
+   */
+  const stripSlotTaken =
     showGate ||
     seriesEnded !== null ||
     intentOpen ||
     resumeOffer !== null ||
-    playbackFailure !== null ||
-    notice !== null;
+    playbackFailure !== null;
+  const cueBlocked = stripSlotTaken || notice !== null;
+  // Read from a swipe handler, which sees the screen as it was before the
+  // move. The free-forever line also waits for the news strip: two messages at
+  // once is one too many, and it has the next swipe.
+  cueBlockedRef.current = cueBlocked || newsCovering;
   // The one-time invitation to install (A11Y-04): after real engagement,
-  // never over anything else on screen (installRules.ts).
-  const install = useInstallOffer(analytics, cueBlocked);
+  // never over anything else on screen (installRules.ts), the news strip
+  // included.
+  const install = useInstallOffer(analytics, cueBlocked || newsCovering);
+
+  /** The news line took the viewer to the first episode they had not seen. */
+  const openFromNews = (target: ContentItem) => {
+    const listed = items.findIndex((item) => item.id === target.id);
+    if (listed >= 0) {
+      handleIndexChange(listed, "next_story");
+      return;
+    }
+    // Not on this page of the feed: the episode and the one after it open a
+    // page of their own, as a resume landing does.
+    handleIndexChange(0, "next_story", pageStartingAt(feed.source, target, items));
+  };
   useEffect(() => {
     if (
       !shouldShowSoundCue({
@@ -1386,15 +1580,28 @@ export function FeedApp({
     onTogglePlayPause: () => playToggleRef.current(),
     onPlayGate: handlePlayGate,
     onLike: (item) => {
-      setLikedIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(item.id)) next.delete(item.id);
-        else next.add(item.id);
-        return next;
+      const liked = !likedIds.has(item.id);
+      const likedAt = Date.now();
+      // Tapped before the chunk is in: the rail answers now, and the device
+      // records what the viewer meant the moment it arrives (applyLike).
+      if (!retentionRef.current) {
+        setRetentionView((view) => ({ ...view, liked: flipped(view.liked, item.id) }));
+      }
+      void ensureRetention().then((loaded) => {
+        if (!loaded) return;
+        onRetentionView(
+          loaded.mod.applyLike(
+            loaded.runtime,
+            { contentId: item.id, seriesId: item.seriesId },
+            liked,
+            likedAt,
+          ),
+        );
       });
       analytics.track("like", {
         content_id: item.id,
         series_id: item.seriesId,
+        liked,
       });
       void recommendationFor(feedRef.current).recordSignal({
         contentId: item.id,
@@ -1409,15 +1616,34 @@ export function FeedApp({
       });
     },
     onFollow: (item) => {
-      setFollowingIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(item.seriesId)) next.delete(item.seriesId);
-        else next.add(item.seriesId);
-        return next;
+      const following = !followingIds.has(item.seriesId);
+      const seriesSlug = seriesSlugOf(feedRef.current.catalog, item.seriesId);
+      const followedAt = Date.now();
+      if (!retentionRef.current) {
+        setRetentionView((view) => ({
+          ...view,
+          following: flipped(view.following, item.seriesId),
+        }));
+      }
+      // What the series has now is recorded with it (applyFollow): the news
+      // counts from the promise, not from episode 1.
+      void ensureRetention().then((loaded) => {
+        if (!loaded) return;
+        onRetentionView(
+          loaded.mod.applyFollow(
+            loaded.runtime,
+            { seriesId: item.seriesId, seriesSlug },
+            following,
+            feedRef.current,
+            followedAt,
+          ),
+        );
       });
       analytics.track("follow", {
         content_id: item.id,
         series_id: item.seriesId,
+        following,
+        episode_count: episodeCountOf(feedRef.current.catalog, item),
       });
       void recommendationFor(feedRef.current).recordSignal({
         contentId: item.id,
@@ -1667,7 +1893,9 @@ export function FeedApp({
           coveredContentId={
             resumeOffer && resumeOffer.reason !== "next_episode"
               ? resumeOffer.contentId
-              : null
+              : newsCovering
+                ? (current?.id ?? null)
+                : null
           }
           likedIds={likedIds}
           followingIds={followingIds}
@@ -1728,8 +1956,22 @@ export function FeedApp({
           />
         ) : null}
 
-        {seriesEnded && current ? (
-          <SeriesEnd
+        {retentionLoaded ? (
+          <retentionLoaded.mod.RetentionLayer
+            runtime={retentionLoaded.runtime}
+            ordered={feed.ordered}
+            complete={feed.complete}
+            currentId={current?.id ?? null}
+            blocked={stripSlotTaken}
+            onViewChange={onRetentionView}
+            onOpenEpisode={openFromNews}
+            onVisibleChange={setNewsCovering}
+            track={trackRetention}
+          />
+        ) : null}
+
+        {seriesEnded && current && seriesEnd.module ? (
+          <seriesEnd.module.SeriesEnd
             seriesTitle={current.seriesTitle}
             kind={seriesEnded}
             position={
@@ -1778,14 +2020,16 @@ export function FeedApp({
           />
         ) : null}
 
-        <IntentSheet
-          open={intentOpen}
-          onClose={() => setIntentOpen(false)}
-          onSelect={(chipId) => {
-            analytics.track("intent_select", { chip_id: chipId });
-            void handleIntentChip(chipId);
-          }}
-        />
+        {intentSheet.module ? (
+          <intentSheet.module.IntentSheet
+            open={intentOpen}
+            onClose={() => setIntentOpen(false)}
+            onSelect={(chipId) => {
+              analytics.track("intent_select", { chip_id: chipId });
+              void handleIntentChip(chipId);
+            }}
+          />
+        ) : null}
 
         {diagOpen ? (
           <LaunchDiagPanel

@@ -2,6 +2,8 @@
 
 import type { ReactElement } from "react";
 
+import { BROWSE_PATH, FREE_FOREVER_LINE } from "@/lib/promise";
+
 import styles from "./feed.module.css";
 
 export type NextStory = {
@@ -86,6 +88,14 @@ export function SeriesEnd({
               ? `You watched the whole story · ${position}`
               : `You’re up to date · ${position}. The next episode isn’t out yet.`}
           </p>
+          {/*
+           * The one argument nobody else can make, said where it is a fact the
+           * viewer has just lived through: they watched to the end and were
+           * asked for nothing (docs/standard.md §1).
+           */}
+          <p className={styles.seriesEndFree} data-free-forever="series_end">
+            {FREE_FOREVER_LINE}
+          </p>
 
           <div className={styles.seriesEndActions}>
             <button type="button" className={styles.seriesEndAction} onClick={onShare}>
@@ -169,6 +179,14 @@ export function SeriesEnd({
         ) : (
           <p className={styles.seriesEndCatalog}>That’s every story we have right now.</p>
         )}
+
+        {/*
+         * The only door out of the feed, and it is at the end of a story, not
+         * over one: everything we have, by genre, one page away (UX-06).
+         */}
+        <a className={styles.seriesEndBrowse} href={BROWSE_PATH} data-browse-link="series_end">
+          See every story
+        </a>
       </div>
     </div>
   );

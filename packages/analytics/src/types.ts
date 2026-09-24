@@ -69,6 +69,21 @@ export type AnalyticsEventName =
   | "install_offer_answered"
   /** The browser reported the app installed (appinstalled). Never sent on iOS, which does not say. */
   | "app_installed"
+  /**
+   * "Free forever. No coins, no unlocks." was said, once per device, at the
+   * first swipe. Sending it more than once for one anonymous_user_id is a bug.
+   */
+  | "free_forever_shown"
+  /**
+   * A followed series had episodes the viewer had not been told about, and the
+   * line was shown. The device is marked told at the same moment, so this is
+   * one event per piece of news, never one per visit.
+   */
+  | "new_episodes_shown"
+  /** The viewer tapped that line and went to the first episode they had not seen. */
+  | "new_episodes_open"
+  /** A page about one series was opened (the address a clip sends a stranger to). */
+  | "series_page_view"
   | "recommendation_requested"
   | "recommendation_generated"
   | "recommendation_impression"

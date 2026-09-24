@@ -174,7 +174,35 @@ function escapeXml(text) {
     .replace(/"/g, "&quot;");
 }
 
-/** Only for a public launch: the home page and every episode page. */
+/** Pages the platform itself owns: never search results, whatever the switch. */
+export const ALWAYS_NOINDEX = new Set(["404.html", "offline.html", "offline-shell.html"]);
+
+/** "watch/s/episode-1.html" → "/watch/s/episode-1"; "index.html" → "/". */
+export function routeOf(rel) {
+  const path = rel.split("\\").join("/").replace(/\.html$/, "");
+  return path === "index" ? "/" : `/${path}`;
+}
+
+/**
+ * Every page a public launch offers to search engines: the feed, every
+ * episode, every series page, and the pages we wrote for people to find
+ * (stories, for-studios) — everything except the ones that are noindex
+ * whatever the switch says.
+ *
+ * The writer (scripts/finish-export.mjs) and the check
+ * (scripts/lib/platform-checks.mjs) both call this, so a new kind of page
+ * cannot end up in one and not the other — which is how a page nobody can
+ * find gets built and nobody notices.
+ */
+export function indexableRoutes(pageNames) {
+  return pageNames
+    .map((name) => name.split("\\").join("/"))
+    .filter((name) => !ALWAYS_NOINDEX.has(name))
+    .map(routeOf)
+    .sort();
+}
+
+/** Only for a public launch: every indexable page (indexableRoutes). */
 export function sitemapXml(siteUrl, paths) {
   const urls = paths.map((path) => `  <url><loc>${escapeXml(`${siteUrl}${path}`)}</loc></url>`);
   return [

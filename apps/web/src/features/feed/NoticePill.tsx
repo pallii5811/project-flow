@@ -7,7 +7,7 @@ import styles from "./feed.module.css";
 export type Notice = {
   /** Changes with each notice, so the same message twice still re-announces. */
   id: number;
-  kind: "sound" | "share_copied" | "share_failed" | "intent";
+  kind: "sound" | "share_copied" | "share_failed" | "intent" | "free_forever";
   text: string;
   /** A link the viewer can copy by hand when the clipboard refused. */
   detail?: string;
@@ -46,6 +46,26 @@ function CheckGlyph(): ReactElement {
       focusable="false"
     >
       <path d="M5 12.5l4.2 4.2L19 7" />
+    </svg>
+  );
+}
+
+/** An open padlock: nothing here is locked, which is the whole claim. */
+function OpenLockGlyph(): ReactElement {
+  return (
+    <svg
+      className={styles.noticeGlyph}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect x="4.5" y="11" width="15" height="9" rx="2.2" />
+      <path d="M8.5 11V7.8a3.5 3.5 0 0 1 6.9-.8" />
     </svg>
   );
 }
@@ -112,6 +132,7 @@ function NoticeBody({
         {notice.kind === "share_copied" || notice.kind === "intent" ? (
           <CheckGlyph />
         ) : null}
+        {notice.kind === "free_forever" ? <OpenLockGlyph /> : null}
         <span>{notice.text}</span>
       </span>
       {notice.detail ? (

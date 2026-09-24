@@ -27,6 +27,7 @@ import {
   buildVersion,
   cssAssetsOf,
   headersFile,
+  indexableRoutes,
   isPublicLaunch,
   offlineShell,
   robotsTxt,
@@ -112,18 +113,16 @@ writeFileSync(
 );
 writeFileSync(join(exportDir, "robots.txt"), robotsTxt({ indexable, siteUrl }));
 const sitemap = join(exportDir, "sitemap.xml");
-const watchPaths = pages
-  .map((page) => relative(exportDir, page).split("\\").join("/"))
-  .filter((name) => name.startsWith("watch/"))
-  .map((name) => `/${name.replace(/\.html$/, "")}`)
-  .sort();
-if (indexable) writeFileSync(sitemap, sitemapXml(siteUrl, ["/", ...watchPaths]));
+const publicPaths = indexableRoutes(
+  pages.map((page) => relative(exportDir, page).split("\\").join("/")),
+);
+if (indexable) writeFileSync(sitemap, sitemapXml(siteUrl, publicPaths));
 else rmSync(sitemap, { force: true });
 
 console.error(
   `finish-export: ${pages.length} pages with their script policy; ` +
     `service worker ${serviceWorkerOn ? `${version}, ${precache.size} files in the offline shell` : "RETIRING"}; ` +
     (indexable
-      ? `PUBLIC: indexable, sitemap of ${watchPaths.length + 1} pages`
+      ? `PUBLIC: indexable, sitemap of ${publicPaths.length} pages`
       : "closed beta: noindex on every page and file, no sitemap"),
 );

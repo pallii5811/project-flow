@@ -853,6 +853,45 @@
   color: #b3b0a8;
 }
 
+/*
+ * The news line carries a way out: the label and the dismiss share a row, and
+ * the button's negative margins keep its 44 px target from making the strip
+ * taller than the Continue one.
+ */
+.stripHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -12px -10px -12px 0;
+}
+
+.stripHead > p {
+  flex: 1;
+  min-width: 0;
+}
+
+.stripDismiss {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(247, 245, 242, 0.72);
+  cursor: pointer;
+}
+
+.stripDismiss:hover {
+  color: #f4f3f1;
+}
+
+.stripDismiss:focus-visible {
+  outline: 2px solid var(--flow-accent, #e8dcc8);
+  outline-offset: 2px;
+}
+
 .stripTitle {
   margin: 0;
   font-family: var(--font-display), sans-serif;
@@ -891,6 +930,30 @@
 .stripButton:active {
   opacity: 0.88;
   transform: scale(0.98);
+}
+
+/*
+ * A phone on its side leaves a frame about 210 px wide: the strip tightens so
+ * its action stays one line ("Watch episode 4" wrapped mid-phrase, measured at
+ * 812x375) and the picture keeps more of the screen.
+ */
+@media (orientation: landscape) and (max-height: 480px) {
+  .strip {
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    padding: 12px 12px 12px;
+    gap: 3px;
+  }
+
+  .stripHead {
+    margin: -10px -8px -10px 0;
+  }
+
+  .stripButton {
+    min-height: 40px;
+    margin-top: 4px;
+    padding: 8px 14px;
+    font-size: 14px;
+  }
 }
 
 /* ---------- Notices: one slot at the top of the frame ---------- */
@@ -1073,6 +1136,16 @@
   margin-top: auto;
 }
 
+/*
+ * Whatever is scrolled to in this column keeps a gap from the screen edge: a
+ * 44 px target flush with the home indicator is a target the thumb cannot
+ * reach, and on a short landscape phone the last row is exactly the one a
+ * viewer scrolls to (R3A-01).
+ */
+.seriesEndScroll > * {
+  scroll-margin-bottom: 16px;
+}
+
 .seriesEndClose {
   position: absolute;
   z-index: 1;
@@ -1133,6 +1206,17 @@
   line-height: 22px;
   color: rgba(247, 245, 242, 0.74);
   font-variant-numeric: tabular-nums;
+}
+
+/* Said once, quietly, under the line that says the story is over. */
+.seriesEndFree {
+  margin: 2px 0 0;
+  font-family: var(--font-body), sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--flow-accent, #e8dcc8);
 }
 
 .seriesEndActions {
@@ -1260,6 +1344,31 @@
   font-size: 14px;
   line-height: 20px;
   color: rgba(247, 245, 242, 0.6);
+}
+
+/* The way to everything else, last in the column and never over the picture. */
+.seriesEndBrowse {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 4px;
+  font-family: var(--font-body), sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  color: #f4f3f1;
+  text-decoration: underline;
+  text-decoration-color: rgba(247, 245, 242, 0.35);
+  text-underline-offset: 4px;
+}
+
+.seriesEndBrowse:hover {
+  text-decoration-color: var(--flow-accent, #e8dcc8);
+}
+
+.seriesEndBrowse:focus-visible {
+  outline: 2px solid var(--flow-accent, #e8dcc8);
+  outline-offset: 2px;
 }
 
 /* ---------- Short and narrow stages (R3A-01) ---------- */

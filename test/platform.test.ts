@@ -342,6 +342,9 @@ function goodExport(indexable = false): Fixture {
     ["404.html", htmlPage({ title: `Page not found · ${BRAND}`, robots: "noindex, nofollow" })],
     ["offline.html", htmlPage({ title: `Offline · ${BRAND}`, robots: "noindex, nofollow" })],
     ["offline-shell.html", htmlPage({ title: `Offline · ${BRAND}`, robots: "noindex, nofollow", script: "" })],
+    // A page about a series: indexable like the feed and the episodes, and
+    // therefore owed a place in the sitemap.
+    ["series/s.html", htmlPage({ title: `S · ${BRAND}`, robots, canonical: `${SITE}/series/s` })],
     ...[1, 2].map(
       (n) =>
         [
@@ -379,7 +382,10 @@ function goodExport(indexable = false): Fixture {
     ],
   ]);
   if (indexable) {
-    texts.set("sitemap.xml", sitemapXml(SITE, ["/", "/watch/s/episode-1", "/watch/s/episode-2"]));
+    texts.set(
+      "sitemap.xml",
+      sitemapXml(SITE, ["/", "/series/s", "/watch/s/episode-1", "/watch/s/episode-2"]),
+    );
   }
   return {
     indexable,
@@ -633,12 +639,35 @@ describe("the export check", () => {
     ["FLOW_PUBLIC=1 without a sitemap", () => setText(open, "sitemap.xml", null), /no sitemap\.xml/],
     [
       "FLOW_PUBLIC=1 with a sitemap missing an episode",
-      () => setText(open, "sitemap.xml", sitemapXml(SITE, ["/", "/watch/s/episode-1"])),
+      () =>
+        setText(open, "sitemap.xml", sitemapXml(SITE, ["/", "/series/s", "/watch/s/episode-1"])),
       /misses 1 page/,
     ],
     [
+      // The old rule listed the feed and the episodes only, so a page about a
+      // series would have been built and left out of every search result.
+      "FLOW_PUBLIC=1 with a sitemap missing the series page",
+      () =>
+        setText(
+          open,
+          "sitemap.xml",
+          sitemapXml(SITE, ["/", "/watch/s/episode-1", "/watch/s/episode-2"]),
+        ),
+      /misses 1 page\(s\): https:\/\/[^\s]+\/series\/s/,
+    ],
+    [
       "FLOW_PUBLIC=1 with a sitemap on another host",
-      () => setText(open, "sitemap.xml", sitemapXml("https://abc.pages.dev", ["/", "/watch/s/episode-1", "/watch/s/episode-2"])),
+      () =>
+        setText(
+          open,
+          "sitemap.xml",
+          sitemapXml("https://abc.pages.dev", [
+            "/",
+            "/series/s",
+            "/watch/s/episode-1",
+            "/watch/s/episode-2",
+          ]),
+        ),
       /lists what is not a page/,
     ],
     [

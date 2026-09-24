@@ -117,6 +117,55 @@ export {
   readResumeEntries,
 } from "./resume/localStorageResumeStore";
 
+export type {
+  FollowTarget,
+  FollowedSeries,
+  LikedEpisode,
+  NewEpisodes,
+  RetentionState,
+  WatchedEpisode,
+} from "./retention/retentionState";
+export {
+  FOLLOW_CAP,
+  LIKE_CAP,
+  RETENTION_STATE_VERSION,
+  WATCHED_CAP,
+  emptyRetentionState,
+  followedSeriesIds,
+  isFollowedSeries,
+  isFollowing,
+  isLiked,
+  isLikedEpisode,
+  isWatchedEpisode,
+  likedContentIds,
+  markSeriesSeen,
+  markWatched,
+  newEpisodesLine,
+  newSinceLastVisit,
+  parseRetentionState,
+  toggleFollow,
+  toggleLike,
+  watchedContentIds,
+} from "./retention/retentionState";
+export type { RetentionStore } from "./retention/localStorageRetentionStore";
+export {
+  RETENTION_STORAGE_KEY,
+  createLocalStorageRetentionStore,
+  createMemoryRetentionStore,
+} from "./retention/localStorageRetentionStore";
+
+export type {
+  BrowseSeries,
+  SeriesPageData,
+  SeriesPageEpisode,
+} from "./series/seriesPage";
+export {
+  browseCatalog,
+  browseGenres,
+  seriesPageData,
+  seriesPageSlugs,
+} from "./series/seriesPage";
+
 export {
   slugify,
   episodeSlugFor,

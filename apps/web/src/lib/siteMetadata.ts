@@ -147,6 +147,75 @@ export function watchMetadata(copy: EpisodeCopy, path: string): Metadata {
   };
 }
 
+/** What a page about a whole series needs to describe itself. */
+export type SeriesCopy = {
+  title: string;
+  hook: string;
+  episodeCount: number;
+  shareCardUrl: string;
+};
+
+/**
+ * The page a clip sends a stranger to, and the one search engines will index
+ * once the beta opens. `openGraph` at page level replaces the layout's whole
+ * object, so the type and the site name are repeated here (VIR-5).
+ */
+export function seriesMetadata(copy: SeriesCopy, path: string): Metadata {
+  const description = `${copy.hook.replace(/\s*\n\s*/g, " ")} ${
+    copy.episodeCount === 1 ? "1 episode" : `${copy.episodeCount} episodes`
+  }, free forever.`.trim();
+  return {
+    title: copy.title,
+    description,
+    alternates: { canonical: path },
+    openGraph: {
+      type: "website",
+      siteName: BRAND_NAME,
+      title: `${copy.title} · ${BRAND_NAME}`,
+      description,
+      url: path,
+      images: [
+        {
+          url: copy.shareCardUrl,
+          width: SHARE_CARD_WIDTH,
+          height: SHARE_CARD_HEIGHT,
+          alt: copy.title,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${copy.title} · ${BRAND_NAME}`,
+      description,
+      images: [copy.shareCardUrl],
+    },
+  };
+}
+
+/**
+ * A page of the site that is not an episode and not a series: the list of
+ * what exists, the page for studios. No link-preview picture is claimed,
+ * because none is generated for them.
+ */
+export function plainPageMetadata(
+  title: string,
+  description: string,
+  path: string,
+): Metadata {
+  return {
+    title,
+    description,
+    alternates: { canonical: path },
+    openGraph: {
+      type: "website",
+      siteName: BRAND_NAME,
+      title: `${title} · ${BRAND_NAME}`,
+      description,
+      url: path,
+    },
+  };
+}
+
 /**
  * The words that travel with a shared link. Messaging apps show the text and
  * the preview card; the product's name is said once, at the end.

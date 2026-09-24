@@ -88,6 +88,20 @@
  *  44. the install invitation: not in the first minute, once, honest events;
  *  45. an episode page names itself, and a share points at the configured site.
  * They also run alone: npm run e2e:web:platform.
+ *
+ * Coming back (docs/decisions.md, batch 8), normal catalog only:
+ *  47. a follow survives a reload, written as the one versioned document an
+ *      account system could upload, recording what the series has now;
+ *  48. "new since you were here": a device that followed at 3 episodes is told
+ *      there are 2 more, goes to episode 4, and is never told twice;
+ *  49. the series page: what plays, what this device watched, and Continue
+ *      reopening episode 3 at the 5 s it was left at;
+ *  50. /for-studios: the Ad Charter's own numbers, the closed-beta state said
+ *      plainly, and not one audience number anywhere on it;
+ *  51. "Free forever. No coins, no unlocks." said once, at the first swipe,
+ *      and never again on that device;
+ *  52. /stories: one page of what exists, genre chips that filter, and a card
+ *      that opens its series page.
  * The export is served through scripts/serve-static.mjs, which applies _headers.
  * Checks 11 and 15 expect a "Next episode" label without a button (B2-UPNEXT).
  */
@@ -313,6 +327,52 @@ async function phoneContext(browser, snapshot) {
     }, snapshot);
   }
   return context;
+}
+
+/** Where follow, like and what was watched live (retentionState.ts). */
+const RETENTION_KEY = "project-flow.retention.v1";
+
+/**
+ * A phone that has been here before: a resume point and/or the retention
+ * document a previous visit would have written. Seeding it by hand is also
+ * how the documented shape is proven — if the app stops reading this, check
+ * 48 goes red.
+ */
+async function returningPhone(browser, { resume = null, retention = null } = {}) {
+  const context = await phoneContext(browser, resume);
+  if (retention) {
+    // Seeded once, then the app owns it: an init script runs before EVERY
+    // document in the context, so writing unconditionally would undo what the
+    // first visit recorded and hide exactly the bug check 48 is about.
+    await context.addInitScript(
+      ([key, state]) => {
+        if (window.localStorage.getItem(key) === null) {
+          window.localStorage.setItem(key, JSON.stringify(state));
+        }
+      },
+      [RETENTION_KEY, retention],
+    );
+  }
+  return context;
+}
+
+/** A follow recorded a while ago, when the series had `seen` episodes. */
+function followedSeries(seen) {
+  const aWhileAgo = Date.now() - 3 * 24 * 60 * 60 * 1_000;
+  return {
+    version: 1,
+    follows: [
+      {
+        seriesId: "series_signal",
+        seriesSlug: "signal-night",
+        seenEpisodeCount: seen,
+        followedAt: aWhileAgo,
+        updatedAt: aWhileAgo,
+      },
+    ],
+    likes: [],
+    watched: [],
+  };
 }
 
 /** Decodes a Playwright PNG screenshot to RGBA pixels. */
@@ -2568,6 +2628,517 @@ try {
         `a rail icon fades into a white frame: ${JSON.stringify(measured.brightFrameRail)}`,
       );
       await brightContext.close();
+    }
+  }
+
+  if (!SCALE) {
+    // 47: a follow is a promise, so it has to outlive the tab. It is written
+    // as the one versioned document an account system could upload as it
+    // stands, and it records what the series has NOW, so the news counts from
+    // the promise and not from episode 1 (retentionState.ts).
+    {
+      const followContext = await phoneContext(browser, null);
+      const page = await followContext.newPage();
+      trackPage(page, "follow", consoleErrors, []);
+      const events = collectAnalytics(page);
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      // The whole catalog arrives after first play, and it is what tells the
+      // follow how many episodes there are: a viewer tapping now waits for it
+      // the same way.
+      await sleep(2_000);
+      await page.click('[data-active="true"] [aria-label="Follow series"]');
+      await sleep(250);
+      const written = await page.evaluate(
+        (key) => window.localStorage.getItem(key),
+        RETENTION_KEY,
+      );
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      const stillFollowing = await page
+        .waitForFunction(
+          () =>
+            document
+              .querySelector('[data-active="true"] [aria-label="Follow series"]')
+              ?.getAttribute("aria-pressed") === "true",
+          null,
+          { timeout: 5_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      let saved = null;
+      try {
+        saved = JSON.parse(written ?? "null");
+      } catch {
+        saved = null;
+      }
+      const entry = saved?.follows?.[0] ?? null;
+      measured.follow = { saved, stillFollowing };
+      check(stillFollowing, "follow did not survive a reload");
+      check(
+        saved?.version === 1 &&
+          saved.follows?.length === 1 &&
+          entry?.seriesId === "series_signal" &&
+          entry?.seriesSlug === "signal-night" &&
+          entry?.seenEpisodeCount === 5 &&
+          typeof entry?.followedAt === "number" &&
+          typeof entry?.updatedAt === "number" &&
+          Array.isArray(saved.likes) &&
+          Array.isArray(saved.watched),
+        `the follow was not written in the documented shape: ${written}`,
+      );
+      check(
+        events.some(
+          (event) => event.name === "follow" && event.properties?.following === true,
+        ),
+        "following a series reported nothing",
+      );
+      await followContext.close();
+    }
+
+    // 48: "new since you were here". A device that followed the series when it
+    // had 3 episodes is told there are 2 more, goes straight to episode 4, and
+    // is never told the same thing twice.
+    {
+      const newsContext = await returningPhone(browser, { retention: followedSeries(3) });
+      const page = await newsContext.newPage();
+      trackPage(page, "new episodes", consoleErrors, []);
+      const events = collectAnalytics(page);
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      const shown = await page
+        .waitForSelector('[data-new-episodes="series_signal"]', { timeout: 12_000 })
+        .then(() => true)
+        .catch(() => false);
+      const line = await page.evaluate(() => {
+        const strip = document.querySelector("[data-new-episodes]");
+        return {
+          label: strip?.querySelector("p")?.textContent ?? null,
+          count: strip?.querySelector("[data-new-episodes-count]")?.textContent ?? null,
+          button: strip?.querySelector("[data-new-episodes-open]")?.textContent ?? null,
+        };
+      });
+      // The button has to be there and do it: a 10-second episode would reach
+      // episode 4 on its own in half a minute, and that is not the promise.
+      const tapped = await page
+        .click("[data-new-episodes-open]", { timeout: 2_000 })
+        .then(() => true)
+        .catch(() => false);
+      const played = await page
+        .waitForFunction(
+          () => window.__flowPlaying.some((entry) => entry.contentId === "item_signal_4"),
+          null,
+          { timeout: 10_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      const told = await page.evaluate(
+        (key) => JSON.parse(window.localStorage.getItem(key) ?? "null"),
+        RETENTION_KEY,
+      );
+      // Told once: the same news must not come back on the next visit.
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      await sleep(4_000);
+      const again = await page.evaluate(
+        () => document.querySelector("[data-new-episodes]") !== null,
+      );
+      measured.newEpisodes = {
+        shown,
+        line,
+        tapped,
+        played,
+        told: told?.follows?.[0] ?? null,
+        again,
+      };
+      check(
+        shown &&
+          line.label === "New since you were here" &&
+          line.count === "2 new episodes" &&
+          line.button === "Watch episode 4",
+        `the news line did not say what is new: ${JSON.stringify(line)}`,
+      );
+      check(tapped && played, "the news line did not take the viewer to episode 4");
+      check(
+        told?.follows?.[0]?.seenEpisodeCount === 5,
+        `being told did not move the mark to 5: ${JSON.stringify(told?.follows?.[0] ?? null)}`,
+      );
+      check(!again, "the same news was shown a second time");
+      check(
+        events.filter((event) => event.name === "new_episodes_shown").length === 1 &&
+          events.some((event) => event.name === "new_episodes_open"),
+        `new_episodes events are not one per piece of news: ${JSON.stringify(
+          events.filter((event) => event.name.startsWith("new_episodes")).map((e) => e.name),
+        )}`,
+      );
+      await newsContext.close();
+    }
+
+    // 49: the page about a series — what a clip viewer opens to know what they
+    // are watching. It says what plays, what they already watched, and takes
+    // them back to the exact moment they left.
+    {
+      const seriesContext = await returningPhone(browser, {
+        resume: {
+          contentId: "item_signal_3",
+          seriesId: "series_signal",
+          episodeId: "ep_signal_3",
+          positionMs: 5_000,
+          durationMs: 10_000,
+          muted: true,
+          captionsOn: false,
+          updatedAt: Date.now(),
+          completed: false,
+        },
+        retention: {
+          version: 1,
+          follows: [],
+          likes: [],
+          watched: [1, 2].map((episodeNumber) => ({
+            contentId: `item_signal_${episodeNumber}`,
+            seriesId: "series_signal",
+            episodeNumber,
+            at: Date.now() - episodeNumber * 1_000,
+          })),
+        },
+      });
+      const page = await seriesContext.newPage();
+      trackPage(page, "series page", consoleErrors, []);
+      await page.goto(`${BASE}/series/signal-night`, { waitUntil: "domcontentloaded" });
+      // Both marks come from this device, after hydration: what was watched
+      // and where the story was left.
+      const hydrated = await page
+        .waitForSelector('[data-episode="1"][data-watched="true"]', { timeout: 8_000 })
+        .then(() => true)
+        .catch(() => false);
+      const continued = await page
+        .waitForSelector('[data-series-continue="3"]', { timeout: 8_000 })
+        .then(() => true)
+        .catch(() => false);
+      const surface = await page.evaluate(() => ({
+        title: document.querySelector("h1")?.textContent ?? null,
+        meta: document.querySelector("[data-series-meta]")?.textContent ?? null,
+        episodes: [...document.querySelectorAll("[data-episode]")].map((row) =>
+          row.getAttribute("data-episode"),
+        ),
+        watched: [...document.querySelectorAll('[data-episode][data-watched="true"]')].map(
+          (row) => row.getAttribute("data-episode"),
+        ),
+        free: [...document.querySelectorAll("[data-free-forever]")].map(
+          (line) => line.textContent,
+        ),
+        start: document.querySelector("[data-series-start]")?.getAttribute("href") ?? null,
+        continueText: document.querySelector("[data-series-continue]")?.textContent ?? null,
+        continueHref:
+          document.querySelector("[data-series-continue]")?.getAttribute("href") ?? null,
+        follow: document
+          .querySelector("[data-series-follow]")
+          ?.getAttribute("aria-pressed"),
+        browse: document.querySelector("[data-browse-link]")?.getAttribute("href") ?? null,
+      }));
+      // A missing control fails this check; it never hangs the run.
+      const followedThrough = await page
+        .click("[data-series-continue]", { timeout: 3_000 })
+        .then(() => true)
+        .catch(() => false);
+      let landed = { active: null, offer: false };
+      let seconds = null;
+      if (followedThrough) {
+        await page
+          .waitForFunction(() => window.__flowPlaying.length > 0, null, { timeout: 15_000 })
+          .catch(() => null);
+        landed = await page.evaluate(() => ({
+          active:
+            document.querySelector('[data-active="true"]')?.getAttribute("data-content-id") ??
+            null,
+          offer: document.querySelector('[aria-label="Continue story"]') !== null,
+        }));
+        await page.click('[aria-label="Continue episode"]', { timeout: 3_000 }).catch(() => null);
+        await sleep(900);
+        seconds = await page.evaluate(activeVideoTime);
+      }
+      measured.seriesPage = { hydrated, continued, surface, followedThrough, landed, seconds };
+      check(
+        surface.title === "Signal Night" &&
+          surface.meta?.includes("5 episodes") === true &&
+          surface.episodes.join(",") === "1,2,3,4,5" &&
+          surface.start === "/watch/signal-night/episode-1" &&
+          surface.follow === "false" &&
+          surface.browse === "/stories",
+        `the series page does not describe the series: ${JSON.stringify(surface)}`,
+      );
+      check(
+        hydrated && surface.watched.join(",") === "1,2",
+        `the series page does not mark what was watched: ${JSON.stringify(surface.watched)}`,
+      );
+      check(
+        surface.free.length === 1 &&
+          surface.free[0] === "Free forever. No coins, no unlocks.",
+        `the free-forever line is missing or repeated on the series page: ${JSON.stringify(surface.free)}`,
+      );
+      check(
+        continued &&
+          surface.continueText === "Continue episode 3" &&
+          surface.continueHref === "/watch/signal-night/episode-3",
+        `the series page does not continue from the saved point: ${JSON.stringify(surface)}`,
+      );
+      check(
+        landed.active === "item_signal_3" && landed.offer && (seconds ?? 0) >= 4.5,
+        `continuing from the series page did not reopen episode 3 at 5 s: ${JSON.stringify({ landed, seconds })}`,
+      );
+      await seriesContext.close();
+    }
+
+    // 50: the page the owner links in an outreach email. Its numbers are the
+    // Ad Charter's own, and it must never carry an audience number, because
+    // there is no audience yet.
+    {
+      const studiosPage = await context.newPage();
+      trackPage(studiosPage, "for studios", consoleErrors, []);
+      const response = await studiosPage.goto(`${BASE}/for-studios`, {
+        waitUntil: "domcontentloaded",
+      });
+      const studios = await studiosPage.evaluate(() => {
+        const text = document.body.innerText;
+        const charter = {};
+        for (const cell of document.querySelectorAll("[data-charter]")) {
+          charter[cell.getAttribute("data-charter")] = cell.firstElementChild?.textContent;
+        }
+        return {
+          title: document.querySelector("h1")?.textContent ?? null,
+          state: document.querySelector("[data-honest-state]")?.textContent ?? null,
+          charter,
+          robots:
+            document.querySelector('meta[name="robots"]')?.getAttribute("content") ?? null,
+          terms: text,
+          // The one thing this page may never carry, whoever writes it next:
+          // a number said about an audience. Any SENTENCE holding both a digit
+          // and an audience word is one — a pattern tied to the exact wording
+          // ("240,000 viewers") let "240,000 monthly viewers" through, which
+          // is how this check was found to be too narrow. The words are the
+          // plural metrics: "no install and no sign-up" is about the product,
+          // "40,000 installs" is a claim.
+          audienceClaims: text
+            .split(/(?<=[.!?])\s+|\n+/)
+            .map((sentence) => sentence.trim())
+            .filter(
+              (sentence) =>
+                /\d/.test(sentence) &&
+                /\b(views|viewers|audience|users|downloads|installs|subscribers|impressions|watch hours|MAU|DAU|monthly active|daily active)\b/i.test(
+                  sentence,
+                ),
+            ),
+        };
+      });
+      measured.forStudios = {
+        status: response ? response.status() : null,
+        ...studios,
+        terms: undefined,
+      };
+      check(response?.status() === 200, `/for-studios answered ${response?.status()}`);
+      check(
+        studios.title === "Every episode free to watch. Every minute paid to you.",
+        `/for-studios does not lead with the offer: ${studios.title}`,
+      );
+      check(
+        studios.charter.grace === "10 min" &&
+          studios.charter.break === "30 s" &&
+          studios.charter.hour === "3 min" &&
+          studios.charter.locked === "0",
+        `the charter on /for-studios is not the Ad Charter: ${JSON.stringify(studios.charter)}`,
+      );
+      check(
+        studios.audienceClaims.length === 0,
+        `/for-studios claims an audience: ${JSON.stringify(studios.audienceClaims)}`,
+      );
+      check(
+        /closed beta/i.test(studios.state ?? "") &&
+          /stand-in pack/i.test(studios.state ?? "") &&
+          /no audience numbers/i.test(studios.state ?? "") &&
+          /no statement has ever been issued/i.test(studios.state ?? ""),
+        `/for-studios does not say where we stand: ${JSON.stringify(studios.state)}`,
+      );
+      check(
+        /noindex/i.test(studios.robots ?? ""),
+        `/for-studios is not noindex while the beta is closed (${studios.robots})`,
+      );
+      for (const term of [
+        "50% of the ad and sponsor revenue",
+        "verified minutes watched",
+        "None. Keep selling your titles anywhere else",
+        "None on either side",
+        "Monthly, per series and market",
+        "On notice",
+        "Earns nothing, however long the pause",
+      ]) {
+        check(
+          studios.terms.includes(term),
+          `/for-studios does not carry the term "${term}"`,
+        );
+      }
+      await studiosPage.close();
+    }
+
+    // 51: the one argument we have, said once on this device and never again.
+    {
+      const freeContext = await phoneContext(browser, null);
+      const page = await freeContext.newPage();
+      trackPage(page, "free forever", consoleErrors, []);
+      const events = collectAnalytics(page);
+      await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      // The sound cue owns the slot first and the line waits for it: wait for
+      // the cue to arrive AND leave, or the swipe happens before the rule
+      // this check is about can apply.
+      await page
+        .waitForSelector('[data-notice="sound"]', { timeout: 6_000 })
+        .catch(() => null);
+      await page.waitForFunction(() => document.querySelector("[data-notice]") === null, null, {
+        timeout: 9_000,
+      });
+      const beforeSwipe = await page.evaluate(
+        () => document.querySelector("[data-notice]") !== null,
+      );
+      await page.evaluate(() =>
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" })),
+      );
+      const said = await page
+        .waitForSelector('[data-notice="free_forever"]', { timeout: 4_000 })
+        .then((element) => element.textContent())
+        .catch(() => null);
+      const remembered = await page.evaluate(() =>
+        window.localStorage.getItem("project-flow.free-forever.v1"),
+      );
+      // It leaves on its own, and a second swipe does not bring it back.
+      await page.waitForFunction(() => document.querySelector("[data-notice]") === null, null, {
+        timeout: 8_000,
+      });
+      await page.evaluate(() =>
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" })),
+      );
+      await sleep(1_200);
+      const twice = await page.evaluate(
+        () => document.querySelector('[data-notice="free_forever"]') !== null,
+      );
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.__flowPlaying.length > 0, null, {
+        timeout: 10_000,
+      });
+      await page.evaluate(() =>
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" })),
+      );
+      await sleep(1_500);
+      const afterReload = await page.evaluate(
+        () => document.querySelector('[data-notice="free_forever"]') !== null,
+      );
+      measured.freeForever = {
+        beforeSwipe,
+        said,
+        remembered,
+        twice,
+        afterReload,
+        events: events.filter((event) => event.name === "free_forever_shown").length,
+      };
+      check(
+        !beforeSwipe && said === "Free forever. No coins, no unlocks.",
+        `the free-forever line was not said at the first swipe: ${JSON.stringify({ beforeSwipe, said })}`,
+      );
+      check(remembered === "1", "the free-forever line was said without being remembered");
+      check(
+        !twice && !afterReload && measured.freeForever.events === 1,
+        `the free-forever line came back: ${JSON.stringify(measured.freeForever)}`,
+      );
+      await freeContext.close();
+    }
+
+    // 52: what exists, by genre — one page, reachable from the end of a story
+    // and from a series page, and deliberate with a single title on it.
+    {
+      const storiesPage = await context.newPage();
+      trackPage(storiesPage, "stories", consoleErrors, []);
+      const response = await storiesPage.goto(`${BASE}/stories`, {
+        waitUntil: "domcontentloaded",
+      });
+      const listing = await storiesPage.evaluate(() => ({
+        title: document.querySelector("h1")?.textContent ?? null,
+        count: document.querySelector("[data-series-count]")?.getAttribute("data-series-count"),
+        cards: [...document.querySelectorAll("[data-series-card]")].map((card) => ({
+          slug: card.getAttribute("data-series-card"),
+          href: card.getAttribute("href"),
+          text: card.textContent,
+        })),
+        genres: [...document.querySelectorAll("[data-genre-filter]")].map((chip) =>
+          chip.getAttribute("data-genre-filter"),
+        ),
+        studios: [...document.querySelectorAll("a")].some(
+          (link) => link.getAttribute("href") === "/for-studios",
+        ),
+        free: [...document.querySelectorAll("[data-free-forever]")].length,
+      }));
+      // The chips are a control, not decoration: one really filters.
+      const genre = listing.genres.find((name) => name !== "all") ?? null;
+      let filtered = null;
+      if (genre) {
+        await storiesPage.click(`[data-genre-filter="${genre}"]`);
+        await sleep(200);
+        filtered = await storiesPage.evaluate(() => ({
+          pressed: document
+            .querySelector('[data-genre-filter][aria-pressed="true"]')
+            ?.getAttribute("data-genre-filter"),
+          count: document
+            .querySelector("[data-series-count]")
+            ?.getAttribute("data-series-count"),
+        }));
+      }
+      // A missing card fails this check; it never hangs the run.
+      const opened = await storiesPage
+        .click("[data-series-card]", { timeout: 3_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (opened) await storiesPage.waitForLoadState("domcontentloaded");
+      const reached = opened ? storiesPage.url() : null;
+      measured.stories = {
+        status: response ? response.status() : null,
+        ...listing,
+        filtered,
+        reached,
+      };
+      check(response?.status() === 200, `/stories answered ${response?.status()}`);
+      check(
+        listing.count === "1" &&
+          listing.cards.length === 1 &&
+          listing.cards[0]?.slug === "signal-night" &&
+          listing.cards[0]?.href === "/series/signal-night" &&
+          listing.cards[0]?.text?.includes("5 episodes") === true,
+        `/stories does not list what exists: ${JSON.stringify(listing.cards)}`,
+      );
+      check(
+        listing.title === "One story, end to end." && listing.free === 1 && listing.studios,
+        `/stories is not deliberate with one title: ${JSON.stringify({
+          title: listing.title,
+          free: listing.free,
+          studios: listing.studios,
+        })}`,
+      );
+      check(
+        genre !== null && filtered?.pressed === genre && filtered?.count === "1",
+        `the genre chips do not filter: ${JSON.stringify({ genre, filtered })}`,
+      );
+      check(
+        reached?.endsWith("/series/signal-night") === true,
+        `a card on /stories did not open its series page (${reached})`,
+      );
+      await storiesPage.close();
     }
   }
 
