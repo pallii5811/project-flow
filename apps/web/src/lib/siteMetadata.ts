@@ -162,3 +162,23 @@ export function shareMessage(copy: Pick<EpisodeCopy, "seriesTitle" | "episodeNum
     text: hook ? `${hook} — ${where}` : where,
   };
 }
+
+/** Title, canonical address and preview for a page that is not the feed. */
+export function plainPageMetadata(
+  title: string,
+  description: string,
+  path: string,
+): Metadata {
+  return {
+    title,
+    description,
+    alternates: { canonical: path },
+    openGraph: {
+      type: "website",
+      siteName: BRAND_NAME,
+      title: `${title} · ${BRAND_NAME}`,
+      description,
+      url: path,
+    },
+  };
+}
