@@ -2,12 +2,23 @@
 
 Written for the owner, step by step. Nothing here downloads video to your computer,
 and nothing asks you to type a password into a script: the video goes from the
-studio's link to a machine GitHub lends us, is cut and packaged there, and lands in
+studio's link to a machine that is not yours, is cut and packaged there, and lands in
 Cloudflare R2 storage. Only small files come back to you: a page of pictures to check,
 and one text file that puts the series online.
 
 Why it works this way: **a 90-minute delivery is 3 to 5 GB**. On your connection that is
-a day and a data plan. On a GitHub runner it is two minutes, and it costs nothing.
+a day and a data plan. On a machine in a data centre it is two minutes.
+
+**Which machine** is a choice you make on the same page, in the `runner` box:
+
+| `runner`               | What happens                                                  | Time for a 90-minute series | Money        |
+| ---------------------- | ------------------------------------------------------------- | ---------------------------- | ------------ |
+| `scaleway` (default)   | a 16-core machine is made for this one series and deleted after | about **1 h 20**, estimated | about **EUR 0.70**, estimated |
+| `github`               | two free threads that GitHub lends us                          | 5 to 10 h                    | none, but most of a month's free minutes |
+
+Both run exactly the same ingest, with the same pinned ffmpeg, and produce the same
+files. The Scaleway one exists because 45 to 60 series will not fit in 2,000 free
+minutes a month — one series would.
 
 ## What you do once, before the first series
 
@@ -70,6 +81,34 @@ GitHub → your repository → **Settings** → **Secrets and variables** → **
 | `R2_SECRET_ACCESS_KEY` | the Secret Access Key                                            |
 | `R2_BUCKET`            | `cliffies-media`                                                 |
 | `MEDIA_BASE_URL`       | the public address from step 1, https, **no `/` at the end**     |
+
+### 4b. The machine that does the work: four more secrets (five minutes)
+
+Only if you want the fast, paid machine. Skip this and run everything with
+`runner: github`; nothing else changes.
+
+1. <https://console.scaleway.com> → the **cliffies** project of the **veezco**
+   organization.
+2. **IAM** → **Applications** → `cliffie-ingest` → **API keys** → **Generate an API
+   key**. Scaleway shows, once: an **Access key** (starts with `SCW`) and a **Secret
+   key** (a long id with dashes). Copy both now — the secret is never shown again.
+   The application must have, for the `cliffies` project only,
+   **InstancesFullAccess** and **BlockStorageFullAccess**. Nothing else: it can
+   make and delete machines in that project and touch nothing you own elsewhere.
+3. **Project settings** → copy the **Project ID** (a long id with dashes).
+4. GitHub → your repository → **Settings** → **Secrets and variables** → **Actions**
+   → **New repository secret**, one per row:
+
+| Name             | Value                                                                    |
+| ---------------- | ------------------------------------------------------------------------ |
+| `SCW_SECRET_KEY` | the Secret key of the `cliffie-ingest` application                        |
+| `SCW_ACCESS_KEY` | the Access key (starts with `SCW`) — kept only to say which key is in use |
+| `SCW_PROJECT_ID` | the Project ID of `cliffies`                                              |
+| `SCW_ZONE`       | `fr-par-1` (or `nl-ams-1`; `pl-waw-1` is the cheapest if it has the type) |
+
+**You paste these yourself.** Claude never sees them and they never appear in a log:
+every message is built from names and statuses, never from values, and the machine's
+own boot file carries no key at all.
 
 ### 5. Tell the site where the video lives
 
@@ -135,7 +174,7 @@ Nothing is published in this mode. It only looks.
 ### C. Publish
 
 **Actions** → **ingest from link** → **Run workflow** → same slug, same link(s),
-**mode**: `publish`.
+**mode**: `publish`, **runner**: `scaleway` (or `github` to pay nothing and wait).
 
 What happens, in order: the file is downloaded; it is checked to be the one the cuts were
 made for; each episode is cut, measured against the quality gate
@@ -168,33 +207,95 @@ The message says what to do; the usual ones:
 | `[black_opening]`, `[silent_opening]`, `[not_vertical]` …         | The quality gate refused an episode: `docs/content-operations.md` §4 says what each one means |
 | `not one episode fits a budget of … minutes`                      | The episodes are very long: tell Claude, the budget is one number in the workflow |
 | `not enough disk`                                                 | The delivery is bigger than a runner can hold: ask for it in two parts           |
+| `the Scaleway credentials are not set`                            | One of the four `SCW_` secrets is missing or mistyped: section 4b. It says which |
+| `already up and --max-parallel is 1`                              | A machine of this project is still running. Wait, or sweep it if it is a leftover |
+| `no price is known for …`                                         | The machine type is not in the price table: add it with the date, or use the default |
+| `budget is over; the machine is being destroyed`                  | The series needs more than six hours on that machine: run again (it continues), or use the 24-core type |
+| `WARNING: something is STILL THERE and may still be billed`       | Run `node scripts/run-on-scaleway.mjs --sweep --older-than-minutes 0 --force` now, and check the Scaleway console |
 
 ## What this costs
 
-Nothing in money, and some **runner minutes**: a private repository gets 2,000 free
-minutes a month. Every run prints, at the end of its page, how many it used and how many
-minutes of video that buys — and that printed number is the one to trust.
+### On `runner: github` — no money, and the month's free minutes
+
+A private repository gets 2,000 free minutes a month. Every run prints, at the end of its
+page, how many it used and how many minutes of video that buys — and that printed number
+is the one to trust.
 
 The estimate before the first real delivery: measured on the machine this was built on,
 with two cores, packaging one minute of 1080×1920 video costs about **3.5 minutes**. A
 GitHub runner's two processors are two threads of a single, slower core, so expect it to
 be slower still — somewhere around **5 to 10 hours for a 90-minute series**, which means
-roughly **one 90-minute series a month** inside the free minutes, and more when the
-episodes are fewer or shorter. That is why a long series is published over several runs
-that continue each other. When the free minutes run out GitHub simply stops starting runs;
-it does not bill you unless you set a spending limit yourself.
+roughly **one 90-minute series a month** inside the free minutes. That is why a long
+series is published over several runs that continue each other. When the free minutes run
+out GitHub simply stops starting runs; it does not bill you unless you set a spending
+limit yourself.
 
-Cheaper, later: a 4-core machine of your own registered as a "self-hosted runner" has no
-minute limit at all. That is a decision to take when the catalogue grows, not now.
+### On `runner: scaleway` — money, by the minute, and it is printed
+
+Every run, whatever happened to it, ends with one line like this:
+
+```
+cost: 1 h 23 min on STANDARD2-A16C-64G at EUR 0.50/hour = EUR 0.70 (measured wall clock,
+compute only) — price read on 2026-09-20
+```
+
+Read it as: how long the machine existed × what that machine costs an hour. The price
+comes from a small table in the repository with the day it was read off your console
+(`scripts/lib/scaleway-plan.mjs`); if you ever change machine type to one that is not in
+that table, **the run refuses to start** rather than spend an amount nobody knows.
+
+Before anything is created, the run also prints what it plans and **the most it can
+possibly cost** — the whole budget at that hourly price, about EUR 3.02 for the default
+six hours. That is the real ceiling of one run.
+
+The estimate, until the first real delivery replaces it: **about 1 h 20 and EUR 0.70 for a
+90-minute series**, so **EUR 30 to 45 for the 45 to 60 series of the launch** — inside the
+EUR 100 of free credit. It is an estimate because the 3.5 minutes per video-minute were
+measured on two cores of another processor and then divided by sixteen with a deliberate
+discount for how badly video encoding scales. The first real run prints the truth.
+
+**Three things stop a machine costing more than that**, and they are independent:
+
+1. the machine **switches itself off** after the budget, even if the run that made it has
+   vanished (it is told to at boot);
+2. the run **deletes it** when it ends — whether it published, was refused, ran out of
+   budget, or was interrupted;
+3. anything a crash still leaves behind is found by the sweeper:
+
+```
+node scripts/run-on-scaleway.mjs --sweep
+```
+
+It lists every machine and disk of this project older than an hour, says what each one has
+cost so far, and deletes it. It will **not** delete a machine that is still inside its own
+budget (that is probably a run in flight) unless you add `--force`. Add `--dry-run` to see
+what it would do and touch nothing.
+
+You can also check from your phone, without any of this: the Scaleway console, **Instances**
+— the list should be empty whenever no run is going.
+
+### Changing the machine
+
+In `scripts/lib/scaleway-plan.mjs`: `DEFAULT_TYPE` is the machine, and `INSTANCE_PRICES`
+is the table of what each one costs. The faster one is already there —
+`STANDARD2-A24C-96G`, 24 cores, EUR 0.6551/hour — and finishes a 90-minute series in about
+an hour for roughly the same money. For one run only, without changing anything:
+`--type STANDARD2-A24C-96G`. A type that is not in the table needs its price and the date
+you read it, or the run refuses.
 
 ## What only you can do
 
 1. Create the Cloudflare R2 bucket, its CORS rule and its API token (steps 1–3).
-2. Paste the five secrets into GitHub yourself (step 4) — Claude never sees them, and
-   they never appear in a log: a half-configured setup is refused by name, never by value.
+2. Paste the **nine** secrets into GitHub yourself — five for the store (step 4), four for
+   the machine (step 4b). Claude never sees them, and they never appear in a log: a
+   half-configured setup is refused by name, never by value.
 3. Add `MEDIA_BASE_URL` to Cloudflare Pages and redeploy (step 5).
 4. Get the studio's written OK before any long file is cut into episodes (section A).
 5. Run the workflow, look at the contact sheets, and say which cuts are wrong (section B).
+6. After the first `scaleway` run: open the Scaleway console and check the **Instances**
+   list is empty. Nothing else here can prove that for you — every proof in this
+   repository runs against a stand-in of Scaleway's API, because no credential of yours
+   exists on the machine this was built on.
 
 ## For whoever maintains this
 
@@ -202,9 +303,23 @@ minute limit at all. That is a decision to take when the catalogue grows, not no
   (propose / split / provenance), `scripts/cloud-ingest.mjs` (the whole run, episode by
   episode, inside a time budget), `scripts/ingest-series.mjs` (unchanged for media in the
   export; uploads to R2 when the five variables are set), `scripts/check-ffmpeg.mjs`.
+- The machine: `scripts/run-on-scaleway.mjs` (make, use, destroy, sweep),
+  `scripts/lib/scaleway.mjs` (the API, no SDK), `scripts/lib/scaleway-plan.mjs` (prices,
+  plan, cost, the cloud-init), `scripts/lib/remote-ssh.mjs` (a key made for one run; the
+  remote command takes no arguments, everything arrives on its stdin),
+  `scripts/lib/pinned-tools.mjs` (one ffmpeg pin for both paths).
 - Proofs: `npm run proof:split` (a compilation with known boundaries), `npm run
   proof:cloud` (a link, a fake store, the whole path twice), `npm run proof:gate`
-  (the quality gate, plus the R2 cases). All three run in CI.
+  (the quality gate, plus the R2 cases), `npm run proof:scaleway` (15 cases against a
+  stand-in Scaleway: made and unmade, destroyed on refusal, on the budget wall and on
+  Ctrl-C, the orchestrator killed mid-run and the leftover swept, no secret anywhere).
+  All four run in CI.
+- What cannot be proven here and must be watched on the first real run: that Scaleway's
+  API answers the shapes `scripts/lib/fake-scaleway.mjs` imitates; that
+  `STANDARD2-A16C-64G` takes an `sbs_volume` (if not, `--volume-type b_ssd`); that the
+  Ubuntu image has snapd and boots cloud-init as assumed; and what a stopped-but-not-yet-
+  deleted machine is billed. No Scaleway credential exists on the machine this was built
+  on, and none was invented.
 - Every object on the media store is named by its content — renditions in their revision
   folder, posters, cards and subtitles with their hash in the name — so nothing on the
   store ever changes, everything is cached for a year, and an upload is skipped when the

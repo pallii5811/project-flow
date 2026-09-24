@@ -37,3 +37,7 @@ jobs:
       # where the rules say, the refusals by name, and everything claimed about
       # a rendered clip measured on it (docs/clips.md §8).
       - run: npm run proof:clips
+
+      # The machine made for one series: made, used, and unmade after every way
+      # a run can end — including the orchestrator being killed mid-run.
+      - run: npm run proof:scaleway

@@ -33,6 +33,100 @@ Format: date · decision · why · consequences · revisit when.
 
 ---
 
+## 2026-09-20 — Batch 7: the encoding moves to a machine made for one series and deleted with it
+
+**Decision:** The workflow gains one input, `runner`, with two values that run the **same**
+ingest: `github` (two free threads, what batch 6 built) and `scaleway` (the default) — a
+16-core machine created for that one series and destroyed at the end of the run. The
+GitHub job then spends a few free minutes orchestrating. Four pieces:
+
+1. **The API client** (`scripts/lib/scaleway.mjs`), 250 lines, no SDK: create a disk and a
+   machine, set the cloud-init, attach, power on, poll, detach, delete, list by tag,
+   resolve an image label. `X-Auth-Token` from `SCW_SECRET_KEY`, in a header and never in
+   a URL. A failure of the API (408, 425, 429, 5xx, a dropped connection) is waited out;
+   a refusal (400, 401, 403, 404) stops at once — the same distinction as
+   `scripts/lib/r2.mjs`. A thing that is not there answers `null`.
+2. **The orchestrator** (`scripts/run-on-scaleway.mjs`). The machine boots with a
+   cloud-init that carries the public half of a key made for that one run, installs the
+   ffmpeg this repository pins and Node 22, and **nothing else**: no R2 key, no Scaleway
+   key, no GitHub token. The repository arrives as `git archive` over ssh — not a clone,
+   because a clone of a private repository needs a token on that machine and a token that
+   outlives a run is exactly what must not exist there. The ingest's environment (slug,
+   links, R2 keys, budget) goes down the **stdin** of a remote command that takes no
+   arguments at all: ssh joins argv into a shell string, so an argument is a shell word
+   and a line on stdin never is. Only small files come back: the manifest and what is
+   known to be on the store.
+3. **Three independent ways the machine dies.** (a) It is told at boot to `shutdown -P`
+   after the budget, so a killed orchestrator costs minutes, not a month. (b) The
+   orchestrator destroys it on success, on refusal, on the wall-clock budget, on Ctrl-C
+   and on an error nobody caught — and the verdict is what the API says is still there
+   afterwards, not what the deletions claimed. (c) `--sweep` finds by tag anything a crash
+   left, says what it has cost so far, and deletes it; the workflow calls it in an
+   `always()` step scoped to its own run id, which is the only step that runs after a job
+   is cancelled.
+4. **Money is a first-class output.** Prices live in a table with the day they were read
+   off the owner's console; a machine type that is not in it is **refused**, not guessed.
+   Every run prints the plan and the most it can possibly cost before creating anything
+   (`--dry-run` prints only that), and ends with what it really cost. What is not known
+   is `null`: the volume's price is not in the table because nobody read it, and the cost
+   line says so instead of adding zero.
+
+**Why:** measured in batch 6, a minute of 1080×1920 costs 3.5 minutes of two cores, so a
+90-minute series is 5 to 10 hours on a GitHub runner — **one series a month** inside the
+2,000 free minutes of a private repository. The launch needs 45 to 60. Sixteen cores turn
+that into about an hour, and about EUR 0.70, from EUR 100 of credit that expires in 41
+days. The whole design is shaped by "zero owner cash" (`AGENTS.md`): the thing being
+bought is paid for **by the minute**, so the failure that matters is not a bad encode, it
+is a machine nobody deleted.
+
+**Consequences:**
+
+- Checks: `test/scaleway.test.ts` (27: the price table and what is null when a price is
+  not known, the estimate, the disk size, the name, the environment block refusing a
+  value with a line break, the cloud-init parsing as YAML and using only commands the
+  image has or installs, the shutdown being the third line and not the last, the same
+  ffmpeg pin as the workflow, and the client against a stand-in API — retries, refusals,
+  the token never in a URL, `redact`), `test/cloud-workflow.test.ts` (12, updated: the
+  new input, the heavy steps gated on one runner or the other, each secret only where it
+  is needed, the `always()` sweep).
+- `npm run proof:scaleway` (15 cases, in CI): the whole life of a machine against a
+  stand-in API; destroyed after exit 1, exit 3, the budget wall and Ctrl-C; the
+  orchestrator SIGKILLed mid-run leaving a machine that the sweeper then finds, prices at
+  EUR 1.68 and deletes; a second run refused while one machine is up; two API failures
+  waited out and a wrong key refused with nothing created; 102 requests scanned for a
+  secret and none found anywhere but the header; and the ingest commands read back out of
+  the cloud-init and run here, on real video, publishing 50 objects to a store that checks
+  every signature.
+- **Estimated, and marked as such everywhere it is printed:** about 1 h 18 and EUR 0.66
+  per 90-minute series on STANDARD2-A16C-64G (56 min and EUR 0.61 on the 24-core), so
+  EUR 30 to 45 for the launch catalogue. It is 3.5 minutes of two cores divided by sixteen
+  with a 40% discount for how badly x264 scales, plus twelve fixed minutes. The first real
+  run replaces it with a measurement, which every run prints.
+- `scripts/lib/pinned-tools.mjs` now holds the ffmpeg URL and hash; a test compares it with
+  the workflow's env, so the two machines cannot drift onto different builds.
+- `docs/cloud-ingest.md` gains the four secrets the owner pastes himself, how to choose the
+  runner from a phone, how to read the cost line, the sweep command, and how to change the
+  machine.
+
+**Not done, and declared:** nothing here has ever spoken to the real Scaleway API — there
+is no credential for it on this machine and none was invented, so what is proven is our
+side of the wire against a stand-in that answers the shapes Scaleway's reference
+documents. Four things can only be learned from the first real run: whether
+`STANDARD2-A16C-64G` takes an `sbs_volume` or a `b_ssd` (`--volume-type` exists for that),
+whether the Ubuntu image boots cloud-init and carries snapd as assumed, what a stopped but
+not yet deleted machine is billed, and whether 16 cores really give the speed estimated
+here. The machine's host key is accepted on first sight (the address comes from the API
+answer for a machine seconds old; there is no out-of-band fingerprint to check it
+against). `--max-parallel` defaults to 1, so a second series waits instead of doubling the
+spend; raising it weakens the sweeper's protection of a run in flight.
+
+**Revisit:** at the first real delivery (the hour, the euro and the volume type are the
+three numbers that matter); when the EUR 100 of credit is spent or expires (41 days from
+2026-09-20); if a series regularly needs more than one run, in which case the budget or
+the machine type moves, both being one number.
+
+---
+
 ## 2026-09-20 — Batch 6: a studio's link becomes a published series without ever touching the owner's computer
 
 **Decision:** A delivery is downloaded, cut, packaged and published **on a machine GitHub lends us**, and the media lands in Cloudflare R2; only small files come back. Four pieces, each refusable on its own:
